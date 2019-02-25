@@ -1,3 +1,4 @@
 theme: jekyll-theme-cayman
 title: LaTe + LaMP home page
 description: Home page for LaTe, the flexible Latency Tester, and LaMP, a custom Latency Measurement Protocol
+show_downloads: true
