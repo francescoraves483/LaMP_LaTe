@@ -132,7 +132,7 @@ At the end of the session, the average, minimum and maximum latency values will 
 
 Both client and server have a timeout set on the sockets they use to receive and send data. After few seconds of inactivity, they will declare the connection as terminated and terminate their execution (or, in case a daemon mode server is launched, a new session will start).
 
-Both the client and the server follow the [LaMP specifications](https://github.com/francescoraves483/LaMP_LaTe/blob/master/docs/LaMP/LaMP_specifications_rev1.0_placeholder.pdf)
+Both the client and the server follow the [LaMP specifications](./LaMP/LaMP_specifications_rev1.0.pdf)
 
 
 ## How does the server daemon mode work?
