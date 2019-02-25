@@ -43,12 +43,6 @@ The full LaMP specifications can be found here: [LaMP specifications, revision 1
 
 # LaTe user guide (v0.1.0-beta)
 
-LaTe supports different modes, based on the client-server paradigm, which is the one supported by LaMP.
-The first command line argument should be a letter corresponding to the desired mode:
-
-- -c <destination address>: client mode
-- -s: server mode
-
 ## Modes
 
 LaTe supports different modes, based on the **client-server** paradigm, which is the one supported by LaMP.
@@ -148,18 +142,18 @@ These examples of usage are also displayed when calling the program with the *-h
 Few important notes about **LaTe** are listed below:
 
 - In order to use raw sockets, root privileges are needed.
-- Time intervals less or equal to 0 ms are not supported and will generate an error (i.e., after -t a number >= 1 should be specified), as they would make no sense in this context.
+- Time intervals less or equal to 0 ms are not supported and will generate an error (i.e., after *-t* a number *>= 1* should be specified), as they would make no sense in this context.
 - When in UDP mode, LaMP payloads are supported up to 1448 B, in order not to exceed the Ethernet MTU, which would case fragmentation in non-raw mode and a transmission error in raw mode.
-- When raw sockets are used (i.e. -r is specified), a destination MAC address should be specified with -M.
-- Specifying  a port is always required when working with LaMP over UDP (i.e. when using the -u option).
-- The server will adapt its mode (ping-like or unidirectional) depending on the packets it receives from the client. Therefore, specifying -B or -U for a server will have no effect.
-- When in non-raw mode, the destination MAC address is not required. If specified with -M, however, it won’t generate an error, but it will be simply ignored by LaTe.
+- When raw sockets are used (i.e. *-r* is specified), a destination MAC address should be specified with *-M*.
+- Specifying  a port is always required when working with LaMP over UDP (i.e. when using the *-u* option).
+- The server will adapt its mode (ping-like or unidirectional) depending on the packets it receives from the client. Therefore, specifying *-B* or *-U* for a server will have no effect.
+- When in non-raw mode, the destination MAC address is not required. If specified with *-M*, however, it won’t generate an error, but it will be simply ignored by LaTe.
 
 ## Latency types
 
 Two latency types are supported as of now. They are all computed thanks to seconds and milliseconds timestamps.
 
-**User-to-user (‘u’)**: in which the sender timestamp (i.e. the client timestamp) is placed in the packet just before passing it to the send system call (for instance, just before passing the LaMP packet to a send call over a SOCK_DRAM socket when in UDP mode, or before passing the whole raw packet, containing IPv4, UDP and LaMP, to a send call related to an ETH_P_ALL raw socket); the receiver timestamp is instead obtained from the real-time clock as soon as the packet has been received and it has been parsed, checking if it is of interest (i.e. if it is really LaMP, if it is has the correct ID and if it is actually the expected one).
+**User-to-user (‘u’)**: in which the sender timestamp (i.e. the client timestamp) is placed in the packet just before passing it to the send system call (for instance, just before passing the LaMP packet to a send call over a *SOCK_DRAM* socket when in UDP mode, or before passing the whole raw packet, containing IPv4, UDP and LaMP, to a send call related to an *ETH_P_ALL* raw socket); the receiver timestamp is instead obtained from the real-time clock as soon as the packet has been received and it has been parsed, checking if it is of interest (i.e. if it is really LaMP, if it is has the correct ID and if it is actually the expected one).
 
 **RTT (‘r’)**: this mode is the one used by iputils ping (if this is wrong, please correct us) to compute the latency with ICMP Echo packets, at least in a standard case. The sender timestamp is obtained like in the User-to-user mode, but the receiver one is obtained directly from the Linux kernel, as every packet is received. These timestamps are still software timestamps, and, according to the kernel documentation, they should be “generated just after a device driver hands a packet to the kernel receive stack”. This allows to reduce the application latency contribution from the receiver side.
 
