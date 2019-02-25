@@ -1,10 +1,53 @@
+
+<img src="./Logo/LaTe_LaMP_logo.png" align="center">
+
+# Main information
+
+**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.0-beta_
+
+This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
+
+As we are still in a beta stage, we highly welcome any contribution, improvement, bug report or suggestion, both to **LaTe** and to the **LaMP** specifications.
+Other than using GitHub, you can freely write to <francescorav.es483@gmail.com>: we will try to reply you as soon as possible. Thank you!
+
+## Makefile
+
+A simple **Makefile** is provided. This file can be used to compile LaTe in the Linux system in which this repository was cloned, with `gcc`. Any improvement to this file is highly welcome.
+
+Additional targets are also defined; in particular:
+- `compilePCdebug`, to compile for the current platform, with `gcc` and the flag `-g` to generate debug informations, to be used with `gdb`.
+- `compileAPU`, as we also used **LaTe** to perform wireless latency measurements on [PC Engines APU1D embedded boards](https://pcengines.ch/apu1d.htm), running [OpenWrt](https://github.com/francescoraves483/OpenWrt-V2X), we defined an additional target to cross-compile LaTe for the boards. This command should work when targeting any **x86_64** embedded board running **OpenWrt**, after the toolchain has been properly set up (tested with OpenWrt 18.06.1). If you want to cross-compile LaTe for other Linux-based platforms, you will need to change the value of **CC_EMBEDDED** inside the Makefile with the compiler you need to use.
+- `compileAPUdebug`, as before, but with the `-g` flag to generate debug informations for `gdb`.
+
+**LaTe** has been tested on Linux kernel versions 4.14.63 and 4.15.0 and it is currently using the [**Rawsock library, version 0.2.0**](https://github.com/francescoraves483/Rawsock_lib).
+
+## How to compile
+
+Clone the master branch of the repository:
+```
+git clone https://github.com/francescoraves483/LaMP_LaTe.git
+cd LaMP_LaTe
+```
+Compile:
+```
+make
+```
+
+The executable is called `LaTe`.
+
+\* In the current version, only **LaMP** over **IPv4** and **UDP** is supported, but we plan to implement other protocols in the future.
+
+# LaMP specifications
+
+The full LaMP specifications can be found here: [LaMP specifications, revision 1.0](./LaMP/LaMP_specifications_rev1.0.pdf).
+
 # LaTe user guide (v0.1.0-beta)
 
 LaTe supports different modes, based on the client-server paradigm, which is the one supported by LaMP.
 The first command line argument should be a letter corresponding to the desired mode:
 
 - -c <destination address>: client mode
-- -s: server mode# LaTe user guide (v0.1.0-beta)
+- -s: server mode
 
 ## Modes
 
@@ -25,7 +68,7 @@ Alternatively, it is possible to specify:
 When *-c* is selected, the destination address must be specified, depending on the protocol. **In UDP mode, this address corresponds to the destination IPv4 address.**
 
 When a client (either *-c* or *-l*) is selected, just after *-c/-l*, a mode has to be specified:
-- **-B** for the standard ping-like bidirectional mode, working like ICMP Echo Request/Reply, but in a client-server fashion (read also the LaMP specifications [LINK]).
+- **-B** for the standard ping-like bidirectional mode, working like ICMP Echo Request/Reply, but in a client-server fashion (read also the [LaMP specifications](./LaMP/LaMP_specifications_rev1.0.pdf)).
 - **-U** for a highly experimental unidirectional mode, in which the client sends a LaMP packet to the server, and the latter tries to compute the latency, based on its own timestamp and on the one embedded by the client inside the packet, without the need of generating a reply. It works only if there is an external way of keeping the devices’ clocks perfectly synchronized, with under-ms precision. As this is not an easy task, this mode shall remain experimental and it should never be preferred over the ping-like one.
 
 ## Protocols
@@ -40,16 +83,18 @@ Protocols are specified through specific arguments. Supported protocols are:
 Then, client and sever specific options should be specified, according to the following table:
 
 ### Mandatory client options
+
 | Argument | Value | Description | Default value |
-| -- | -- | -- | -- |
-| -t | Time interval in ms, integer, *> 0* | Specifies the periodicity, in milliseconds, to send at. | - |
-| -p | Port, integer, *> 0* and *< 65535* | Specifies the port to be used. Mandatory only if protocol is UDP. | - |
-| -M | Destination MAC address | Specifies the destination MAC address. Mandatory only if socket is RAW (*-r* is selected) and protocol is UDP | - |
+| -------- | ----- | ----------- | ------------- |
+-t | Time interval in ms, integer, *> 0* | Specifies the periodicity, in milliseconds, to send at. | - |
+-p | Port, integer, *> 0* and *< 65535* | Specifies the port to be used. Mandatory only if protocol is UDP. | - |
+-M | Destination MAC address | Specifies the destination MAC address. Mandatory only if socket is RAW (*-r* is selected) and protocol is UDP | - |
 
 
 ### Optional client options
+
 | Argument | Value | Description | Default value |
-| -- | -- | -- | -- |
+| -------- | ----- | ----------- | ------------- |
 | -n | Total number of packets to be sent, integer, *> 0* | Specifies how many packets to send. | 10 |
 | -f | Filename, without extension | Print the report to a CSV file other than printing it on the screen. The default behaviour will append to an existing file; if the file does not exist, it is created. | - |
 | -o (valid only with *-f*) | - | Instead of appending to an existing file, overwrite it. | - |
@@ -60,14 +105,16 @@ Then, client and sever specific options should be specified, according to the fo
 
 
 ### Mandatory server options
+
 | Argument | Value | Description | Default value |
-| -- | -- | -- | -- |
+| -------- | ----- | ----------- | ------------- |
 | -t | Timeout in ms, integer, *> 0* | Specifies the timeout after which the connection should bec onsidered lost (minimum value: 1000 ms, otherwise 1000 ms will be automatically set). | - |
 | -p | Port, integer, *> 0* and *< 65535* | Specifies the port to be used. Mandatory only if protocol is UDP. | - |
 
 ### Optional server options
+
 | Argument | Value | Description | Default value |
-| -- | -- | -- | -- |
+| -------- | ----- | ----------- | ------------- |
 | -r | - | Use raw sockets, if supported for the current protocol. When '-r' is set, the program tries to insert the LaMP timestamp in the last possible instant before sending. _sudo_ (or proper permissions) is required in this case. | (non raw) |
 | -A | Access category, string: **BK** or **BE** or **VI** or **VO** | Forces a certain EDCA MAC access category to be used. This option requires a pathed kernel to work (a warning will be printed about this), but it has been successfully used to perform latency measurements over 802.11p, using a patched version of OpenWrt, i.e. using both OpenC2X-Embedded (https://github.com/florianklingler/OpenC2X-embedded) and OpenWrt-V2X (https://github.com/francescoraves483/OpenWrt-V2X). | (not set, i.e. AC_BE) |
 | -L | Latency type, char: **u** or **r** | Select latency type: user-to-user or RTT. Please note that the server supports this parameter only when in unidirectional mode. If a bidirectional INIT packet is received, the mode is completely ignored. Additional types will probably be added in future versions of the program.| u |
@@ -148,3 +195,11 @@ The `<pid>` is an integer number univocally identifying each process (i.e. each 
 The `<pid>` of the LaTe server program can be found by means of the `ps` utility (if it is not listed, use `ps -A`).
 
 After giving the termination command, the current session will run until it will finish, then the program will be terminated as a normal, non-daemon, server.
+
+# Version information
+
+The current version is **0.1.0-beta**, using **LaMP rev 1.0** and **Rawsock library v0.2.0**.
+
+Developed in **Politecnico di Torino**, licensed under **GPLv2**.
+
+This is **open source**: you should never be charged for using or downloading LaTe and the source code should always be made available to you.
