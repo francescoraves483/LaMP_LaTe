@@ -18,7 +18,7 @@ static const char *latencyTypes[]={"Unknown","User-to-user","RTT"};
 
 static void print_long_info(void) {
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
-		"%s [-h]: print help\n"
+		"%s [-h]: print help and information about available interfaces (including indeces)\n"
 		"%s [-v]: print version information\n\n"
 		"-c: client mode\n"
 		"-s: server mode\n"
@@ -64,6 +64,10 @@ static void print_long_info(void) {
 		"\t  be used (patched kernel required!).\n"
 		"  -L <latency type: u | r>: select latency type: user-to-user or RTT.\n"
 		"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
+		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
+		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
+		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
+		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"\n"
 
 		"[options] - Mandatory server options:\n"
@@ -83,6 +87,10 @@ static void print_long_info(void) {
 		"  -L <latency type: u | r>: select latency type: user-to-user or RTT.\n"
 		"\t  Default: u. Please note that the server supports this parameter only when in unidirectional mode.\n"
 		"\t  If a bidirectional INIT packet is received, the mode is completely ignored.\n"
+		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
+		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
+		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
+		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"\n"
 
 		"Example of usage:\n"
@@ -102,7 +110,7 @@ static void print_long_info(void) {
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,GITHUB_LINK);
 
 		fprintf(stdout,"\nAvailable interfaces (use -I <index> to bind to a specific WLAN interface,\n"
-			"or -I <index> -e to bind to a specific non-WLAN interface.\n");
+			"or -I <index> -e to bind to a specific non-WLAN interface):\n");
 		vifPrinter(stdout); // vifPrinter() from Rawsock library 0.2.1
 
 	exit(EXIT_SUCCESS);
@@ -168,6 +176,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t v_flag=0; // =1 if -v was selected, in order to exit immediately after reporting the requested information
 	uint8_t M_flag=0; // =1 if a destination MAC address was specified. If it is not, and we are running in raw server mode, report an error
 	uint8_t L_flag=0; // =1 if a latency type was explicitely defined (with -L), otherwise = 0
+	uint8_t eI_flag=0; // =1 if either -e or -I (or both) was specified, otheriwse = 0
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
 
@@ -326,6 +335,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 			case 'e':
 				options->nonwlan_mode=1;
+				eI_flag=1;
 				break;
 
 			case 'v':
@@ -432,6 +442,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					fprintf(stderr,"Error: invalid interface index.\n");
 					print_short_info_err(options);
 				}
+				eI_flag=1;
 				break;
 
 			default:
@@ -504,6 +515,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
 		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
+		if(eI_flag==1) {
+			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
+			print_short_info_err(options);
+		}
 		if(options->mode_raw==RAW) {
 			fprintf(stderr,"Error: raw sockets are not supported in loopback clients.\n");
 			print_short_info_err(options);
@@ -517,6 +532,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			print_short_info_err(options);
 		}
 	} else if(options->mode_cs==LOOPBACK_SERVER) {
+		if(eI_flag==1) {
+			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
+			print_short_info_err(options);
+		}
 		if(options->mode_raw==RAW) {
 			fprintf(stderr,"Error: raw sockets are not supported in loopback servers.\n");
 			print_short_info_err(options);
