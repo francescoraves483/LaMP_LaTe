@@ -157,7 +157,7 @@ Few important notes about **LaTe** are listed below:
 
 ## Latency types
 
-Two latency types are supported as of now. They are all computed thanks to seconds and milliseconds timestamps.
+Two latency types are supported as of now. They are all computed thanks to seconds and microseconds timestamps.
 
 **User-to-user (‘u’)**: in which the sender timestamp (i.e. the client timestamp) is placed in the packet just before passing it to the send system call (for instance, just before passing the LaMP packet to a send call over a *SOCK_DRAM* socket when in UDP mode, or before passing the whole raw packet, containing IPv4, UDP and LaMP, to a send call related to an *ETH_P_ALL* raw socket); the receiver timestamp is instead obtained from the real-time clock as soon as the packet has been received and it has been parsed, checking if it is of interest (i.e. if it is really LaMP, if it is has the correct ID and if it is actually the expected one).
 
