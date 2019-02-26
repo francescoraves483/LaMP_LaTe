@@ -2,3 +2,7 @@
 Gemfile
 Gemfile.lock
 _site
+
+# Any compiled file should be ignored
+*.o
+LaTe
