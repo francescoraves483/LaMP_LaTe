@@ -1,5 +1,5 @@
 // Rawsock library, licensed under GPLv2
-// Version 0.2.0
+// Version 0.2.1
 #include "ipcsum_alth.h"
 
 // This is all taken from Linux kernel 4.19.1 (this is not original work)

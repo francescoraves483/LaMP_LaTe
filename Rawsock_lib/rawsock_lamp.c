@@ -1,5 +1,5 @@
 // Rawsock library, licensed under GPLv2
-// Version 0.2.0 beta
+// Version 0.2.1
 #include "rawsock.h"
 #include "rawsock_lamp.h"
 #include "minirighi_udp_checksum.h"
