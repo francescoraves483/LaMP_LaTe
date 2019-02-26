@@ -1,0 +1,4 @@
+# Ignore files and directories related to local GitHub Pages
+Gemfile
+Gemfile.lock
+_site
