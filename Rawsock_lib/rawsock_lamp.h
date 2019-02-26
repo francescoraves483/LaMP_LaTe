@@ -10,8 +10,8 @@
 
 	The version number of this module is set to be the same as the main Rawsock library version number.
 
-	\version 0.2.0 beta
-	\date 2019-02-15
+	\version 0.2.1
+	\date 2019-02-26
 	\copyright Licensed under GPLv2
 **/
 #ifndef RAWSOCK_LAMP_H_INCLUDED

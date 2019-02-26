@@ -56,6 +56,8 @@ int main (int argc, char **argv) {
 	// Set wlanLookupIdx, depending on the mode (loopback vs normal mode)
 	if(opts.mode_cs==LOOPBACK_CLIENT || opts.mode_cs==LOOPBACK_SERVER) {
 		wlanLookupIdx=WLANLOOKUP_LOOPBACK;
+	} else {
+		wlanLookupIdx=opts.if_index;
 	}
 
 	// Allocate memory for the source MAC address (only if 'RAW' is specified)
@@ -67,8 +69,8 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	// Look for available wireless interfaces
-	ret_wlanl_val=wlanLookup(devname,&ifindex,srcmacaddr,&srcIPaddr,wlanLookupIdx);
+	// Look for available wireless/non-wireless interfaces
+	ret_wlanl_val=wlanLookup(devname,&ifindex,srcmacaddr,&srcIPaddr,wlanLookupIdx,opts.nonwlan_mode==0 ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
 	if(ret_wlanl_val<=0) {
 		rs_printerror(stderr,ret_wlanl_val);
 		exit(EXIT_FAILURE);
@@ -87,6 +89,9 @@ int main (int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 	}
+
+	// Print current interface name
+	fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",devname,ifindex);
 
 	// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
 	if(opts.mode_cs==LOOPBACK_CLIENT || opts.mode_cs==LOOPBACK_SERVER) {
@@ -194,9 +199,6 @@ int main (int argc, char **argv) {
 		fprintf(stderr,"Warning: could not set RCVTIMEO: in case certain packets are lost,\n"
 			"the program may run for an indefinite time and may need to be terminated with Ctrl+C.\n");
 	}
-
-	// Print current interface name
-	fprintf(stdout,"\nThe program will work on the interface: %s.\n\n",devname);
 
 	switch(opts.mode_cs) {
 		// Client is who sends packets

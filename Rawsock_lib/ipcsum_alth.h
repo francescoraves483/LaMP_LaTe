@@ -12,7 +12,7 @@
 	The function, even though it is used internally in the main Rawsock module, is available through a separate
 	header in order to enable any application to use it separately in user space, when needed.
 
-	\version Rawsock library verion: 0.2.0; Linux kernel version: 4.19.1
+	\version Rawsock library verion: 0.2.1; Linux kernel version: 4.19.1
 	\author Jorge Cwik, <jorge@laser.satlink.net>
 	\author Arnt Gulbrandsen, <agulbra@nvg.unit.no>
 	\author Tom May, <ftom@netcom.com>

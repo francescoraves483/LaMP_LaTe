@@ -95,13 +95,13 @@ unsigned int macAddrTypeGet(macaddr_t mac) {
 }
 
 /**
-	\brief Automatically look for available WLAN or loopback interfaces.
+	\brief Automatically look for available WLAN, non-WLAN or loopback interfaces.
 	
-	This function can be used to automatically look for available and ready WLAN
+	This function can be used to automatically look for available and ready WLAN or non-WLAN (depending on _mode_)
 	interfaces in the system.
 
-	From version 0.2.0 beta it is also possible to specify [WLANLOOKUP_LOOPBACK](\ref WLANLOOKUP_LOOPBACK) as _index_
-	to look for the first available lookback interface, instead of WLAN ones.
+	From version 0.2.0 it is also possible to specify [WLANLOOKUP_LOOPBACK](\ref WLANLOOKUP_LOOPBACK) as _index_
+	to look for the first available lookback interface, instead of WLAN/non-WLAN ones.
 
 	When only one interface is available and `0` is specified as index, 
 	that interface name is returned inside `devname`. 
@@ -109,26 +109,29 @@ unsigned int macAddrTypeGet(macaddr_t mac) {
 	the corresponding source MAC address (if available) and
 	the corresponding source IP address (if available) are respectively returned.
 
-	If more than one interface is present, the number of available interfaces 
+	If more than one interface is present, the number of available interfaces of the specified type (WLAN/non-WLAN)
 	is returned by the function and _index_ is used to point to a specific interface 
-	(for instance `index=1` can be used to point to a possible `wlan1` interface).
+	(for instance `index=1` can be used to point to a possible `wlan1` interface when _mode_ is [WLANLOOKUP_WLAN](\ref WLANLOOKUP_WLAN)).
+
+	To print the available indeces, the user can use vifPrinter().
 
 	\param[out] 	devname 	Name of the WLAN interface.
 	\param[out]		ifindex 	Interface index corresponding to _devname_ (filled in only if non-NULL).
 	\param[out]		mac     	Interface (source) MAC address (filled in only if non-NULL / non-[MAC_NULL](\ref MAC_NULL)).
 	\param[out]		srcIP		Interface (source) IPv4 address (filled in only if non-NULL and returned inside a _struct in_addr_, which should be available in the calling module).
-	\param[in]		index       Integer index used to point to a specific WLAN interface, when more than one is available (or equal to [WLANLOOKUP_LOOPBACK](\ref WLANLOOKUP_LOOPBACK) to look for the first available loopback interface).
+	\param[in]		index       Integer index used to point to a specific interface of the specified type (i.e. using the specified _mode_), when more than one is available (or equal to [WLANLOOKUP_LOOPBACK](\ref WLANLOOKUP_LOOPBACK) to look for the first available loopback interface).
+	\param[in] 		mode 		Operating mode: [WLANLOOKUP_WLAN](\ref WLANLOOKUP_WLAN) to look for available WLAN interfaces only, [WLANLOOKUP_NONWLAN](\ref WLANLOOKUP_NONWLAN) to look for available non-WLAN/Ethernet interfaces only
 
-	\return Number of wireless interfaces that were found, <b> > 0 </b>, or, in case of error, a [rawsockerr_t](\ref rawsockerr_t) error:
+	\return Number of WLAN/non-WLAN interfaces that were found, <b> > 0 </b>, or, in case of error, a [rawsockerr_t](\ref rawsockerr_t) error:
 	- *ERR_WLAN_NOIF* -> no interfaces found
-	- *ERR_WLAN_SOCK* -> cannot create socket to look for wireless interfaces
+	- *ERR_WLAN_SOCK* -> cannot create socket to look for available and running interfaces
 	- *ERR_WLAN_GETIFADDRS* -> error in calling `getifaddrs()`
 	- *ERR_WLAN_INDEX* -> invalid index value
 	- *ERR_WLAN_GETSRCMAC* -> unable to get source MAC address (if requested)
 	- *ERR_WLAN_GETIFINDEX* -> unable to get source interface index (if requested)
 	- *ERR_WLAN_GETSRCMAC* -> unable to get source IP address (if requested)
 **/
-rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_addr *srcIP, int index) {
+rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_addr *srcIP, int index, int mode) {
 	// Variables for wlan interfaces detection
 	int sFd=-1;
 	// struct ifaddrs used to look for available interfaces and bind to a wireless interface
@@ -141,6 +144,7 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 	struct iflist *iflist_it=NULL; // To iterate the list
 	struct iflist *iflist_u=NULL; // To free the list
 	int ifno=0;
+	int ioctl_result=0; // Result of the call to ioctl(sFd,SIOCGIWNAME,&wifireq)
 	int return_value=1; // Return value: >0 ok - # of found interfaces, <=0 error 
 								 // (=0 for no WLAN interfaces, =-1 for socket error, =-2 for getifaddrs error)
 							     // (=-3 for wrong index, =-4 unable to get MAC address, =-5 unable to get ifindex)
@@ -154,13 +158,13 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 	// Open socket (needed)
 	sFd=socket(AF_INET,SOCK_DGRAM,0); // Any socket should be fine (to be better investigated!)
 	if(sFd==-1) {
-		return_value=-1;
+		return_value=ERR_WLAN_SOCK;
 		goto sock_error_occurred;
 	}
 
 	// Getting all interface addresses
 	if(getifaddrs(&ifaddr_head)==-1) {
-		return_value=-2;
+		return_value=ERR_WLAN_GETIFADDRS;
 		goto getifaddrs_error_occurred;
 	}
 
@@ -174,6 +178,8 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 
 			// One loopback interface is returned
 			return_value=1;
+
+			break;
 		} else {
 			if(ifaddr_it->ifa_addr!=NULL && ifaddr_it->ifa_addr->sa_family == AF_PACKET) {
 				// fprintf(stdout,"Checking interface %s for use.\n",ifaddr_it->ifa_name);
@@ -181,15 +187,16 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 				//  including its terminating zero byte"
 				// This is done because (from man7.org) "normally, the user specifies which device to affect by setting
 	            //  ifr_name to the name of the interface"
-				strncpy(wifireq.ifr_name,ifaddr_it->ifa_name,IFNAMSIZ); 
+				strncpy(wifireq.ifr_name,ifaddr_it->ifa_name,IFNAMSIZ);
 
 				// Trying to get the Wireless Extensions (a socket descriptor must be specified to ioctl())
-				if(ioctl(sFd,SIOCGIWNAME,&wifireq)!=-1) {
-					// Check if the interface is up
-					if(ioctl(sFd,SIOCGIFFLAGS,&wifireq)!=-1 && (wifireq.ifr_flags & IFF_UP)) {
+				ioctl_result=ioctl(sFd,SIOCGIWNAME,&wifireq);
+
+				// Current interface should be considered
+				if((ioctl_result!=-1 && mode==WLANLOOKUP_WLAN) || (ioctl_result==-1 && mode==WLANLOOKUP_NONWLAN)) {
+					if(ifaddr_it->ifa_addr!=NULL && (ifaddr_it->ifa_flags & IFF_UP) && !(ifaddr_it->ifa_flags & IFF_LOOPBACK)) {
 						// If the interface is up, add it to the head of the "iflist" (it is not added to the tail in order to
 						//  avoid defining an extra pointer)
-						// fprintf(stdout,"Interface %s (#%d) is up. It may be used.\n",ifaddr_it->ifa_name,ifno);
 						ifno++;
 						curr_ptr=malloc(sizeof(struct iflist));
 						curr_ptr->ifaddr_ptr=ifaddr_it;
@@ -200,35 +207,29 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 							curr_ptr->next=iflist_head;
 							iflist_head=curr_ptr;
 						}
-					} // else {
-						// fprintf(stdout,"Interface is not up (or it is impossibile to check that).\n");
-					// }
-				} // else {
-					// fprintf(stdout,"Interface is not wireless.\n");
-				// }
+					}
+				}
 			}
 		}
 	}
 
-	// Scan the list of returned wireless interfaces only if lookback was not specified
+	// Scan the list of returned interfaces only if lookback was not specified
 	if(index!=-1) {
 		// No wireless interfaces found (the list is empty)
 		if(iflist_head==NULL) {
-			// fprintf(stderr,"No wireless interfaces found. The program will terminate now.\n");
 			return_value=0;
 			goto error_occurred;
 		} else if(ifno==1) {
-			// Only one wireless interface found -> it is possible to ignore 'index'
+			// Only one wireless interface found
+			if(index>=1) {
+				return_value=ERR_WLAN_INDEX;
+				goto error_occurred;
+			}
 			strncpy(devname,iflist_head->ifaddr_ptr->ifa_name,IFNAMSIZ);
-			// fprintf(stdout,"Interface %s (#0) will be used.\n\n",devname);
 		} else {
-			// Multiple wireless interfaces found -> use the value of 'index'
-			// fprintf(stdout,"Please insert the interface # to be used: ");
-			// fflush(stdout);
-			// fscanf(stdin,"%d",&ifindex);
+			// Multiple interfaces found -> use the value of 'index'
 			if(index>=ifno) {
-				//fprintf(stderr,"Invalid interface index. Aborting execution.\n");
-				return_value=-3;
+				return_value=ERR_WLAN_INDEX;
 				goto error_occurred;
 			}
 			return_value=ifno; // Return the number of interfaces found
@@ -239,7 +240,6 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 				index++;
 			}
 			strncpy(devname,iflist_it->ifaddr_ptr->ifa_name,IFNAMSIZ);
-			// fprintf(stdout,"Interface %s will be used.\n\n",devname);
 		}
 	}
 
@@ -249,7 +249,7 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 		if(ioctl(sFd,SIOCGIFHWADDR,&wifireq)!=-1) {
 			memcpy(mac,wifireq.ifr_hwaddr.sa_data,MAC_ADDR_SIZE);
 		} else {
-			return_value=-4;
+			return_value=ERR_WLAN_GETSRCMAC;
 			goto error_occurred;
 		}
 	}
@@ -260,7 +260,7 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 		if(ioctl(sFd,SIOCGIFINDEX,&wifireq)!=-1) {
 			*ifindex=wifireq.ifr_ifindex;
 		} else {
-			return_value=-5;
+			return_value=ERR_WLAN_GETIFINDEX;
 			goto error_occurred;
 		}
 	}
@@ -272,7 +272,7 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 		if(ioctl(sFd,SIOCGIFADDR,&wifireq)!=-1) {
 			*srcIP=((struct sockaddr_in*)&wifireq.ifr_addr)->sin_addr;
 		} else {
-			return_value=-6;
+			return_value=ERR_WLAN_GETSRCIP;
 			// No need to go to error_occurred, as we are already there
 		}
 	}
@@ -291,6 +291,74 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 
 	sock_error_occurred:
 	return return_value;
+}
+
+/**
+	\brief Print information about available interfaces
+	
+	This function can be used to automatically print some information
+	about the interfaces which are up and available in the system.
+
+	The **"Interface internal index"** value can be used as a reference
+	for the _index_ value to be inserted in wlanLookup(), as last argument,
+	when more than one wireless interface is available on the system.
+
+	\param[out] 	stream 		File stream to print to (a file, _stdout_ or _stderr_)
+
+	\return **0** if no error occurred, or, in case of error, a [rawsockerr_t](\ref rawsockerr_t) error:
+	- *ERR_VIFPRINTER_SOCK* -> cannot create socket to look for available interfaces
+	- *ERR_VIFPRINTER_GETIFADDRS* -> error in calling `getifaddrs()`
+**/
+rawsockerr_t vifPrinter(FILE *stream) {
+	int sFd=-1;
+	struct ifaddrs *ifaddr_head, *ifaddr_it;
+	struct ifreq wifireq;
+	int wlan_ifno=0;
+	int nonwlan_ifno=0;
+
+	// Open socket (needed)
+	sFd=socket(AF_INET,SOCK_DGRAM,0); // Any socket should be fine (to be better investigated!)
+	if(sFd==-1) {
+		return ERR_VIFPRINTER_SOCK;
+	}
+
+	// Getting all interface addresses
+	if(getifaddrs(&ifaddr_head)==-1) {
+		close(sFd);
+		return ERR_VIFPRINTER_GETIFADDRS;
+	}
+
+	fprintf(stream,"Interface name\t | Interface type\t | Interface internal index\n"
+		 "--------------\t | --------------\t | ------------------------\n");
+
+	// Looking for wlan interfaces
+	bzero(&wifireq,sizeof(wifireq));
+	// Iterating over the interfaces linked list
+	for(ifaddr_it=ifaddr_head;ifaddr_it!=NULL;ifaddr_it=ifaddr_it->ifa_next) {
+		if(ifaddr_it->ifa_addr!=NULL && (ifaddr_it->ifa_flags & IFF_LOOPBACK) && ifaddr_it->ifa_addr->sa_family==AF_PACKET) {
+			fprintf(stream,"%s\t\t | %s\t\t | %s\t\n",ifaddr_it->ifa_name,"Loopback","(lo)");
+		} else {
+			if(ifaddr_it->ifa_addr!=NULL && ifaddr_it->ifa_addr->sa_family==AF_PACKET) {
+
+				strncpy(wifireq.ifr_name,ifaddr_it->ifa_name,IFNAMSIZ); 
+				if(ioctl(sFd,SIOCGIWNAME,&wifireq)!=-1) {
+					if(ioctl(sFd,SIOCGIFFLAGS,&wifireq)!=-1 && (wifireq.ifr_flags & IFF_UP)) {
+						// If the interface is up, print the information related to such interface
+						fprintf(stream,"%s\t\t | %s\t\t | (wlan) %d\t\n",ifaddr_it->ifa_name,"Wireless",wlan_ifno);
+						wlan_ifno++;
+					}
+				} else {
+					// Interface is not wireless
+					if(ifaddr_it->ifa_addr!=NULL && (ifaddr_it->ifa_flags & IFF_UP)) {
+						fprintf(stream,"%s\t\t | %s\t\t | (non-wlan) %d\t\n",ifaddr_it->ifa_name,"Non-wireless",wlan_ifno);
+						nonwlan_ifno++;
+					}
+				}
+			}
+		}
+	}
+
+	return 1;
 }
 
 /**
@@ -314,7 +382,7 @@ rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_ad
 void rs_printerror(FILE *stream,rawsockerr_t code) {
 	switch(code) {
 		case ERR_WLAN_NOIF:
-			fprintf(stream,"wlanLookup: No WLAN interfaces found.\n");
+			fprintf(stream,"wlanLookup: No interfaces found.\n");
 		break;
 
 		case ERR_WLAN_SOCK:
@@ -587,8 +655,8 @@ void getSrcMAC(struct ether_header *etherHeader, macaddr_t macsrc) {
 	\param[out]  addrs 			Pointer to the [ipaddrs](\ref ipaddrs) structure to be filled in with the destination and source IP addresses, or NULL if no structure has to be filled in.
 
 	\return **0** if the header was filled in properly, or, in case of error, a [rawsockerr_t](\ref rawsockerr_t) error:
-	- *ERR_IPHEADP_SOCK* -> internal socket creation error: unable to set source IP address inside the header
-	- *ERR_IPHEADP_NOSRCADDR* -> cannot retrieve the source IP address to be inserted inside the header
+	- *ERR_IPHEAD_SOCK* -> internal socket creation error: unable to set source IP address inside the header
+	- *ERR_IPHEAD_NOSRCADDR* -> cannot retrieve the source IP address to be inserted inside the header
 **/
 rawsockerr_t IP4headPopulate(struct iphdr *IPhead, char *devname, char *destIP, unsigned char tos,unsigned short frag_offset, unsigned char ttl, unsigned char protocol,unsigned int flags,struct ipaddrs *addrs) {
 	struct in_addr destIPAddr;
@@ -608,13 +676,13 @@ rawsockerr_t IP4headPopulate(struct iphdr *IPhead, char *devname, char *destIP, 
 	// Get own IP address
 	sFd=socket(AF_INET,SOCK_DGRAM,0);
 	if(sFd==-1) {
-		return -10;
+		return ERR_IPHEAD_SOCK;
 	}
 	strncpy(wifireq.ifr_name,devname,IFNAMSIZ);
 	wifireq.ifr_addr.sa_family = AF_INET;
 	if(ioctl(sFd,SIOCGIFADDR,&wifireq)!=0) {
 		close(sFd);
-		return -11;
+		return ERR_IPHEAD_NOSRCADDR;
 	}
 	close(sFd);
 	IPhead->saddr=((struct sockaddr_in*)&wifireq.ifr_addr)->sin_addr.s_addr;
@@ -664,8 +732,8 @@ rawsockerr_t IP4headPopulate(struct iphdr *IPhead, char *devname, char *destIP, 
 	\param[out]  addrs 			Pointer to the [ipaddrs](\ref ipaddrs) structure to be filled in with the destination and source IP addresses, or NULL if no structure has to be filled in.
 
 	\return **0** if the header was filled in properly, or, in case of error, a [rawsockerr_t](\ref rawsockerr_t) error:
-	- *ERR_IPHEADP_SOCK* -> internal socket creation error: unable to set source IP address inside the header
-	- *ERR_IPHEADP_NOSRCADDR* -> cannot retrieve the source IP address to be inserted inside the header
+	- *ERR_IPHEAD_SOCK* -> internal socket creation error: unable to set source IP address inside the header
+	- *ERR_IPHEAD_NOSRCADDR* -> cannot retrieve the source IP address to be inserted inside the header
 **/
 rawsockerr_t IP4headPopulateS(struct iphdr *IPhead, char *devname, struct in_addr destIP, unsigned char tos,unsigned short frag_offset, unsigned char ttl, unsigned char protocol,unsigned int flags,struct ipaddrs *addrs) {
 	int sFd; // To get the current IP address
@@ -683,13 +751,13 @@ rawsockerr_t IP4headPopulateS(struct iphdr *IPhead, char *devname, struct in_add
 	// Get own IP address
 	sFd=socket(AF_INET,SOCK_DGRAM,0);
 	if(sFd==-1) {
-		return -10;
+		return ERR_IPHEAD_SOCK;
 	}
 	strncpy(wifireq.ifr_name,devname,IFNAMSIZ);
 	wifireq.ifr_addr.sa_family = AF_INET;
 	if(ioctl(sFd,SIOCGIFADDR,&wifireq)!=0) {
 		close(sFd);
-		return -11;
+		return ERR_IPHEAD_NOSRCADDR;
 	}
 	close(sFd);
 	IPhead->saddr=((struct sockaddr_in*)&wifireq.ifr_addr)->sin_addr.s_addr;
@@ -739,8 +807,8 @@ rawsockerr_t IP4headPopulateS(struct iphdr *IPhead, char *devname, struct in_add
 	\param[out] addrs 			Pointer to the [ipaddrs](\ref ipaddrs) structure to be filled in with the destination and source IP addresses, or NULL if no structure has to be filled in.
 
 	\return **0** if the header was filled in properly, or, in case of error, a [rawsockerr_t](\ref rawsockerr_t) error:
-	- *ERR_IPHEADP_SOCK* -> internal socket creation error: unable to set source IP address inside the header
-	- *ERR_IPHEADP_NOSRCADDR* -> cannot retrieve the source IP address to be inserted inside the header
+	- *ERR_IPHEAD_SOCK* -> internal socket creation error: unable to set source IP address inside the header
+	- *ERR_IPHEAD_NOSRCADDR* -> cannot retrieve the source IP address to be inserted inside the header
 **/
 rawsockerr_t IP4headPopulateB(struct iphdr *IPhead, char *devname,unsigned char tos,unsigned short frag_offset, unsigned char ttl, unsigned char protocol,unsigned int flags,struct ipaddrs *addrs) {
 	struct in_addr broadIPAddr;
@@ -760,13 +828,13 @@ rawsockerr_t IP4headPopulateB(struct iphdr *IPhead, char *devname,unsigned char 
 	// Get own IP address
 	sFd=socket(AF_INET,SOCK_DGRAM,0);
 	if(sFd==-1) {
-		return -10;
+		return ERR_IPHEAD_SOCK;
 	}
 	strncpy(wifireq.ifr_name,devname,IFNAMSIZ);
 	wifireq.ifr_addr.sa_family = AF_INET;
 	if(ioctl(sFd,SIOCGIFADDR,&wifireq)!=0) {
 		close(sFd);
-		return -11;
+		return ERR_IPHEAD_NOSRCADDR;
 	}
 	close(sFd);
 	IPhead->saddr=((struct sockaddr_in*)&wifireq.ifr_addr)->sin_addr.s_addr;

@@ -5,7 +5,7 @@
 #include <netinet/in.h>
 #include "Rawsock_lib/rawsock_lamp.h" // In order to import the definition of protocol_t
 
-#define VALID_OPTS "hut:n:c:df:svlmop:rA:BM:P:UL:"
+#define VALID_OPTS "hut:n:c:df:svlmop:reA:BM:P:UL:I:"
 #define SUPPORTED_PROTOCOLS "[-u]"
 #define INIT_CODE 0xAB
 
@@ -62,6 +62,8 @@ struct options {
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	uint8_t terminator; // Set with '-T': = 1 is the server should only terminate another server and exit, = 0 in any other normal operating condition
 	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (RTT, gettimeofday()+ioctl()), 'h' (hardware timers, only if supported)
+	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise (default: 0)
+	long if_index; // Interface index to be used (default: 0)
 
 	// Consider adding a union here when other protocols will be added...
 	struct in_addr destIPaddr;

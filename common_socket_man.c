@@ -1,5 +1,4 @@
 #include "common_socket_man.h"
-#include <linux/net_tstamp.h> // Required for the SO_TIMESTAMPING flags
 
 int socketCreator(protocol_t protocol) {
 	int sFd;

@@ -5,8 +5,8 @@
 	you want to use the library to simplify and enhance the use of Linux raw sockets.
 	It supports, as of now, IPv4 and UDP.
 
-	\version 0.2.0 beta
-	\date 2019-02-15
+	\version 0.2.1
+	\date 2019-02-26
 	\copyright Licensed under GPLv2
 **/
 #ifndef RAWSOCK_H_INCLUDED
@@ -34,6 +34,13 @@
 
 #define ERR_IPHEAD_SOCK -10 /**< __[IP4headPopulate*()](\ref IP4headPopulate) error definition__: internal socket creation error. */
 #define ERR_IPHEAD_NOSRCADDR -11 /**< __[IP4headPopulate*()](\ref IP4headPopulate) error definition__: unable to retrieve current device IP address. */
+
+#define ERR_VIFPRINTER_SOCK -20 /**< __vifPrinter() error definition__: socket creation error. */
+#define ERR_VIFPRINTER_GETIFADDRS -21 /**< __vifPrinter() error definition__: getifaddrs() (to obtain interfaces list) error. */
+
+// wlanLookup() modes
+#define WLANLOOKUP_WLAN 0 /**< __wlanLookup() mode definition__: look for wireless interfaces only. */
+#define WLANLOOKUP_NONWLAN 1 /**< __wlanLookup() mode definition__: look for non-wireless interfaces only. */
 
 // Names
 #define MAC_NULL 0x00 /**< __MAC type definition (managed by prepareMacAddrT(), macAddrTypeGet() and freeMacAddrT())__: NULL MAC-address (NULL pointer returned). */
@@ -116,7 +123,8 @@ typedef enum {
 } protocol_t;
 
 // General utilities
-rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_addr *srcIP, int index);
+rawsockerr_t wlanLookup(char *devname, int *ifindex, macaddr_t mac, struct in_addr *srcIP, int index, int mode);
+rawsockerr_t vifPrinter(FILE *stream);
 macaddr_t prepareMacAddrT();
 unsigned int macAddrTypeGet(macaddr_t mac);
 void freeMacAddrT(macaddr_t mac);

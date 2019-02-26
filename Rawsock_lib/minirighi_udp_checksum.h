@@ -12,7 +12,7 @@
 	The function, even though it is used internally in the main Rawsock module, is available through a separate
 	header in order to enable any application to use it separately, when needed.
 
-	\version Rawsock library verion: 0.2.0 beta
+	\version Rawsock library verion: 0.2.1
 	\author Andrea Righi <drizzt@inwind.it>
 	\date 2003-01-21 Andrea Righi: Suppressed deferencing type-punned pointer warning.
 	\copyright Licensed under GPLv2, (c) 2003 Andrea Righi

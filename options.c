@@ -101,6 +101,10 @@ static void print_long_info(void) {
 		"%s\n",
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,GITHUB_LINK);
 
+		fprintf(stdout,"\nAvailable interfaces (use -I <index> to bind to a specific WLAN interface,\n"
+			"or -I <index> -e to bind to a specific non-WLAN interface.\n");
+		vifPrinter(stdout); // vifPrinter() from Rawsock library 0.2.1
+
 	exit(EXIT_SUCCESS);
 }
 
@@ -152,6 +156,9 @@ void options_initialize(struct options *options) {
 	options->terminator=0;
 
 	options->latencyType=USERTOUSER; // Default: user-to-user latency
+
+	options->nonwlan_mode=0;
+	options->if_index=0;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -317,6 +324,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				options->overwrite=1;
 				break;
 
+			case 'e':
+				options->nonwlan_mode=1;
+				break;
+
 			case 'v':
 				fprintf(stdout,"%s, version %s, date %s\n",PROG_NAME_LONG,VERSION,DATE);
 				v_flag=1;
@@ -409,6 +420,18 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 				L_flag=1;
 
+				break;
+
+			case 'I':
+				errno=0; // Setting errno to 0 as suggested in the strtol() man page
+				options->if_index=strtol(optarg,&sPtr,0);
+				if(sPtr==optarg) {
+					fprintf(stderr,"Cannot find any digit in the specified interface index.\n");
+					print_short_info_err(options);
+				} else if(errno || options->if_index<0) {
+					fprintf(stderr,"Error: invalid interface index.\n");
+					print_short_info_err(options);
+				}
 				break;
 
 			default:
