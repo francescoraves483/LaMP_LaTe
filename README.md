@@ -4,7 +4,7 @@
 
 ![](./docs/pics/LaMP_logo.png)
 
-**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.0-beta_
+**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.1-beta_
 
 This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
 
@@ -21,7 +21,7 @@ Additional targets are also defined; in particular:
 - `compileAPU`, as we also used **LaTe** to perform wireless latency measurements on [PC Engines APU1D embedded boards](https://pcengines.ch/apu1d.htm), running [OpenWrt](https://github.com/francescoraves483/OpenWrt-V2X), we defined an additional target to cross-compile LaTe for the boards. This command should work when targeting any **x86_64** embedded board running **OpenWrt**, after the toolchain has been properly set up (tested with OpenWrt 18.06.1). If you want to cross-compile LaTe for other Linux-based platforms, you will need to change the value of **CC_EMBEDDED** inside the Makefile with the compiler you need to use.
 - `compileAPUdebug`, as before, but with the `-g` flag to generate debug informations for `gdb`.
 
-**LaTe** has been tested on Linux kernel versions 4.14.63 and 4.15.0 and it is currently using the [**Rawsock library, version 0.2.0**](https://github.com/francescoraves483/Rawsock_lib).
+**LaTe** has been tested on Linux kernel versions 4.14.63 and 4.15.0 and it is currently using the [**Rawsock library, version 0.2.1**](https://github.com/francescoraves483/Rawsock_lib).
 
 **How to compile**
 
