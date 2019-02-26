@@ -5,7 +5,7 @@
 
 ## What is LaTe?
 
-**LaTe** is a flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.0-beta_.
+**LaTe** is a flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.1-beta_.
 
 This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
 
@@ -21,7 +21,7 @@ Additional targets are also defined; in particular:
 - `compileAPU`, as we also used **LaTe** to perform wireless latency measurements on [PC Engines APU1D embedded boards](https://pcengines.ch/apu1d.htm), running [OpenWrt](https://github.com/francescoraves483/OpenWrt-V2X), we defined an additional target to cross-compile LaTe for the boards. This command should work when targeting any **x86_64** embedded board running **OpenWrt**, after the toolchain has been properly set up (tested with OpenWrt 18.06.1). If you want to cross-compile LaTe for other Linux-based platforms, you will need to change the value of **CC_EMBEDDED** inside the Makefile with the compiler you need to use.
 - `compileAPUdebug`, as before, but with the `-g` flag to generate debug informations for `gdb`.
 
-**LaTe** has been tested on Linux kernel versions 4.14.63 and 4.15.0 and it is currently using the [**Rawsock library, version 0.2.0**](https://github.com/francescoraves483/Rawsock_lib).
+**LaTe** has been tested on Linux kernel versions 4.14.63 and 4.15.0 and it is currently using the [**Rawsock library, version 0.2.1**](https://github.com/francescoraves483/Rawsock_lib).
 
 ## How to compile
 
@@ -43,7 +43,7 @@ The executable is called `LaTe`.
 
 The full LaMP specifications can be found here: [LaMP specifications, revision 1.0](./LaMP/LaMP_specifications_rev1.0.pdf).
 
-# LaTe user guide (v0.1.0-beta)
+# LaTe user guide (v0.1.1-beta)
 
 ## Modes
 
@@ -56,7 +56,7 @@ The first command line argument should be a letter corresponding to the desired 
 - **-m**: server mode, binding to a loopback interface
   
 Alternatively, it is possible to specify:
-- **-h**: to print the long version of the help, directly within LaTe
+- **-h**: to print the long version of the help, directly within LaTe, including the available interfaces and their internal indeces, to be passed to LaTe using _-I_.
 - **-v**: to print additional version information
 
 *-v* or *-h* should be used alone, without any additional parameter.
@@ -98,6 +98,8 @@ Then, client and sever specific options should be specified, according to the fo
 | -r | - | Use raw sockets, if supported for the current protocol. When '-r' is set, the program tries to insert the LaMP timestamp in the last possible instant before sending. _sudo_ (or proper permissions) is required in this case. | (non raw) |
 | -A | Access category, string: **BK** or **BE** or **VI** or **VO** | Forces a certain EDCA MAC access category to be used. This option requires a pathed kernel to work (a warning will be printed about this), but it has been successfully used to perform latency measurements over 802.11p, using a patched version of OpenWrt, i.e. using both OpenC2X-Embedded (https://github.com/florianklingler/OpenC2X-embedded) and OpenWrt-V2X (https://github.com/francescoraves483/OpenWrt-V2X). | (not set, i.e. AC_BE) |
 | -L | Latency type, char: **u** or **r** | Select latency type: user-to-user or RTT. Additional types will probably be added in future versions of the program.| u |
+| -I | Interface index (returned by the _-h_ option) | Internal index of the interface to be used for the latency measurement session. | 0 |
+| -e | - | Bind to a non-wireless interface instead of looking for wireless interfaces. | (wireless) |
 
 
 ### Mandatory server options
@@ -115,6 +117,8 @@ Then, client and sever specific options should be specified, according to the fo
 | -A | Access category, string: **BK** or **BE** or **VI** or **VO** | Forces a certain EDCA MAC access category to be used. This option requires a pathed kernel to work (a warning will be printed about this), but it has been successfully used to perform latency measurements over 802.11p, using a patched version of OpenWrt, i.e. using both OpenC2X-Embedded (https://github.com/florianklingler/OpenC2X-embedded) and OpenWrt-V2X (https://github.com/francescoraves483/OpenWrt-V2X). | (not set, i.e. AC_BE) |
 | -L | Latency type, char: **u** or **r** | Select latency type: user-to-user or RTT. Please note that the server supports this parameter only when in unidirectional mode. If a bidirectional INIT packet is received, the mode is completely ignored. Additional types will probably be added in future versions of the program.| u |
 | -d | - | Set the server in *continuous daemon mode*: as a session is terminated, the server will be restarted and will be able to accept new packets from other clients, in a new session | (off) |
+| -I | Interface index (returned by the _-h_ option) | Internal index of the interface to be used for the latency measurement session. | 0 |
+| -e | - | Bind to a non-wireless interface instead of looking for wireless interfaces. | (wireless) |
 
 ## Example of usage
 
@@ -194,7 +198,7 @@ After giving the termination command, the current session will run until it will
 
 # Version information
 
-The current version is **0.1.0-beta**, using **LaMP rev 1.0** and **Rawsock library v0.2.0**.
+The current version is **0.1.1-beta**, using **LaMP rev 1.0** and **Rawsock library v0.2.1**.
 
 Developed in **Politecnico di Torino**, licensed under **GPLv2**.
 
