@@ -179,6 +179,7 @@ int main (int argc, char **argv) {
 			// Compute Rx timeout as: (MIN_TIMEOUT_VAL_C + 2000) ms if -t <= MIN_TIMEOUT_VAL_C ms or t + 2 s if -t > MIN_TIMEOUT_VAL_C ms
 			// Take into account that 'interval' is in 'ms' and 'tv_sec' is in 's'
 			rx_timeout.tv_sec=opts.interval<=MIN_TIMEOUT_VAL_C ? (MIN_TIMEOUT_VAL_C+2000)/1000 : (opts.interval+2000)/1000;
+			rx_timeout.tv_usec=0;
 		break;
 		case SERVER:
 		case LOOPBACK_SERVER:
