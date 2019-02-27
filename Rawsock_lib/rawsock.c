@@ -350,7 +350,7 @@ rawsockerr_t vifPrinter(FILE *stream) {
 				} else {
 					// Interface is not wireless
 					if(ifaddr_it->ifa_addr!=NULL && (ifaddr_it->ifa_flags & IFF_UP)) {
-						fprintf(stream,"%s\t\t | %s\t\t | (non-wlan) %d\t\n",ifaddr_it->ifa_name,"Non-wireless",wlan_ifno);
+						fprintf(stream,"%s\t\t | %s\t\t | (non-wlan) %d\t\n",ifaddr_it->ifa_name,"Non-wireless",nonwlan_ifno);
 						nonwlan_ifno++;
 					}
 				}
