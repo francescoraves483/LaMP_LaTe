@@ -3,76 +3,49 @@
 #include "ipcsum_alth.h"
 
 // This is all taken from Linux kernel 4.19.1 (this is not original work)
-static inline unsigned short from64to16(unsigned long x)
-{
-	/* Using extract instructions is a bit more efficient
-	   than the original shift/bitmask version.  */
-
-	union {
-		unsigned long	ul;
-		unsigned int	ui[2];
-		unsigned short	us[4];
-	} in_v, tmp_v, out_v;
-
-	in_v.ul = x;
-	tmp_v.ul = (unsigned long) in_v.ui[0] + (unsigned long) in_v.ui[1];
-
-	/* Since the bits of tmp_v.sh[3] are going to always be zero,
-	   we don't have to bother to add that in.  */
-	out_v.ul = (unsigned long) tmp_v.us[0] + (unsigned long) tmp_v.us[1]
-			+ (unsigned long) tmp_v.us[2];
-
-	/* Similarly, out_v.us[2] is always zero for the final add.  */
-	return out_v.us[0] + out_v.us[1];
+static inline unsigned short from32to16(unsigned int x) {
+	/* add up 16-bit and 16-bit for 16+c bit */
+	x = (x & 0xffff) + (x >> 16);
+	/* add up carry.. */
+	x = (x & 0xffff) + (x >> 16);
+	return x;
 }
 
 // This is all taken from Linux kernel 4.19.1 (this is not original work)
-static inline unsigned long do_csum(const unsigned char * buff, int len) {
-	int odd, count;
-	unsigned long result = 0;
+static unsigned int do_csum(const unsigned char *buff, int len) {
+	int odd;
+	unsigned int result = 0;
 
 	if (len <= 0)
 		goto out;
 	odd = 1 & (unsigned long) buff;
 	if (odd) {
-		result = *buff << 8;
+#ifdef __LITTLE_ENDIAN
+		result += (*buff << 8);
+#else
+		result = *buff;
+#endif
 		len--;
 		buff++;
 	}
-	count = len >> 1;		/* nr of 16-bit words.. */
-	if (count) {
+	if (len >= 2) {
 		if (2 & (unsigned long) buff) {
 			result += *(unsigned short *) buff;
-			count--;
 			len -= 2;
 			buff += 2;
 		}
-		count >>= 1;		/* nr of 32-bit words.. */
-		if (count) {
-			if (4 & (unsigned long) buff) {
-				result += *(unsigned int *) buff;
-				count--;
-				len -= 4;
+		if (len >= 4) {
+			const unsigned char *end = buff + ((unsigned)len & ~3);
+			unsigned int carry = 0;
+			do {
+				unsigned int w = *(unsigned int *) buff;
 				buff += 4;
-			}
-			count >>= 1;	/* nr of 64-bit words.. */
-			if (count) {
-				unsigned long carry = 0;
-				do {
-					unsigned long w = *(unsigned long *) buff;
-					count--;
-					buff += 8;
-					result += carry;
-					result += w;
-					carry = (w > result);
-				} while (count);
 				result += carry;
-				result = (result & 0xffffffff) + (result >> 32);
-			}
-			if (len & 4) {
-				result += *(unsigned int *) buff;
-				buff += 4;
-			}
+				result += w;
+				carry = (w > result);
+			} while (buff < end);
+			result += carry;
+			result = (result & 0xffff) + (result >> 16);
 		}
 		if (len & 2) {
 			result += *(unsigned short *) buff;
@@ -80,8 +53,12 @@ static inline unsigned long do_csum(const unsigned char * buff, int len) {
 		}
 	}
 	if (len & 1)
+#ifdef __LITTLE_ENDIAN
 		result += *buff;
-	result = from64to16(result);
+#else
+		result += (*buff << 8);
+#endif
+	result = from32to16(result);
 	if (odd)
 		result = ((result >> 8) & 0xff) | ((result & 0xff) << 8);
 out:

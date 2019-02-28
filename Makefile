@@ -6,16 +6,16 @@ RAWSOCK_FILES=Rawsock_lib/rawsock.h Rawsock_lib/rawsock.c Rawsock_lib/ipcsum_alt
 CFILES=LatencyTester.c options.c report_manager.c common_socket_man.c udp_client_raw.c udp_client.c udp_server_raw.c udp_server.c timer_man.c common_udp.c common_thread.c
 
 compilePC: LatencyTester.c options.c report_manager.c udp_client.c udp_server.c
-	$(CC) -o LaTe -static $(DEPS) $(RAWSOCK_FILES) $(CFILES) -lpthread 
+	$(CC) -o LaTe $(DEPS) $(RAWSOCK_FILES) $(CFILES) -lpthread 
 
 compilePCdebug: LatencyTester.c options.c report_manager.c udp_client.c udp_server.c
-	$(CC) -o LaTe -static $(DEPS) $(RAWSOCK_FILES) $(CFILES) -g -lpthread 
+	$(CC) -o LaTe $(DEPS) $(RAWSOCK_FILES) $(CFILES) -g -lpthread 
 	
 compileAPU: LatencyTester.c options.c report_manager.c udp_client.c udp_server.c
-	$(CC_EMBEDDED) -o LaTe -static $(DEPS) $(RAWSOCK_FILES) $(CFILES)
+	$(CC_EMBEDDED) -o LaTe $(DEPS) $(RAWSOCK_FILES) $(CFILES)
 
 compileAPUdebug: LatencyTester.c options.c report_manager.c udp_client.c udp_server.c
-	$(CC_EMBEDDED) -o LaTe -static $(DEPS) $(RAWSOCK_FILES) $(CFILES) -g
+	$(CC_EMBEDDED) -o LaTe $(DEPS) $(RAWSOCK_FILES) $(CFILES) -g
 
 clean:
 	rm LaTe

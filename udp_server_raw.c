@@ -3,7 +3,7 @@
 #include "packet_structs.h"
 #include "timeval_subtract.h"
 #include <sys/ioctl.h>
-#include <net/if.h>
+#include <linux/if.h>
 #include <linux/if.h>
 #include <unistd.h>
 #include <stdlib.h>
