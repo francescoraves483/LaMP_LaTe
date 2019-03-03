@@ -3,3 +3,6 @@
 
 # Compiled LaTe executable
 LaTe
+
+# nohup.out file, if the user launches LaTe with nohup (can be useful with daemon mode servers)
+nohup.out
