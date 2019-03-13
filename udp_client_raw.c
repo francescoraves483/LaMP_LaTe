@@ -332,8 +332,8 @@ static void *rxLoop_t (void *arg) {
 		pthread_exit(NULL);
 	}
 
-	// Prepare ancillary data structures, if RTT mode is selected
-	if(args->opts->latencyType==RTT) {
+	// Prepare ancillary data structures, if KRT mode is selected
+	if(args->opts->latencyType==KRT) {
 		// iovec buffers (scatter/gather arrays)
 		iov.iov_base=packet;
 		iov.iov_len=sizeof(packet);
@@ -362,8 +362,8 @@ static void *rxLoop_t (void *arg) {
 
 	// Start receiving packets until an 'ENDREPLY' one is received (this is the ping-like loop)
 	do {
-		// If in RTT mode, use recvmsg(), otherwise, use recvfrom
-		if(args->opts->latencyType==RTT) {
+		// If in KRT mode, use recvmsg(), otherwise, use recvfrom
+		if(args->opts->latencyType==KRT) {
 			saferecvmsg(rcv_bytes,args->sData.descriptor,&mhdr,NO_FLAGS);
 
 			// Extract ancillary data
@@ -584,8 +584,8 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, char *devname, macaddr
 		fprintf(stdout,"\t[user priority] = %d\n",opts->macUP);
 	}
 
-	if(opts->latencyType==RTT) {
-		// Check if the RTT mode is supported by the current NIC and set the proper socket options
+	if(opts->latencyType==KRT) {
+		// Check if the KRT mode is supported by the current NIC and set the proper socket options
 		if (socketSetTimestamping(sData.descriptor)<0) {
 		 	perror("socketSetTimestamping() error");
 		    fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");

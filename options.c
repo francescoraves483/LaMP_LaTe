@@ -14,7 +14,7 @@
 #define CSV_EXTENSION_LEN 4 // '.csv' length
 #define CSV_EXTENSION_STR ".csv"
 
-static const char *latencyTypes[]={"Unknown","User-to-user","RTT"};
+static const char *latencyTypes[]={"Unknown","User-to-user","KRT"};
 
 static void print_long_info(void) {
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
@@ -62,7 +62,7 @@ static void print_long_info(void) {
 		"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
 		"  -A <access category: BK | BE | VI | VO>: forces a certain EDCA MAC access category to\n"
 		"\t  be used (patched kernel required!).\n"
-		"  -L <latency type: u | r>: select latency type: user-to-user or RTT.\n"
+		"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n"
 		"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
 		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
@@ -84,7 +84,7 @@ static void print_long_info(void) {
 		"\t  be used (patched kernel required!).\n"
 		"  -d: set the server in 'continuous daemon mode': as a session is terminated, the server\n"
 		"\t  will be restarted and will be able to accept new packets from other clients.\n"
-		"  -L <latency type: u | r>: select latency type: user-to-user or RTT.\n"
+		"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n"
 		"\t  Default: u. Please note that the server supports this parameter only when in unidirectional mode.\n"
 		"\t  If a bidirectional INIT packet is received, the mode is completely ignored.\n"
 		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
@@ -408,7 +408,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					print_short_info_err(options);
 				}
 
-				fprintf(stdout,"optarg[0]=%c\n",optarg[0]);
 				if(optarg[0]!='r' && optarg[0]!='u') {
 					fprintf(stderr,"Error: valid -L options: 'u', 'r'.\n");
 					print_short_info_err(options);
@@ -420,7 +419,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 						break;
 
 					case 'r':
-						options->latencyType=RTT;
+						options->latencyType=KRT;
 						break;
 
 					default:

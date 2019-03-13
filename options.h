@@ -25,7 +25,7 @@
 typedef enum {
 	UNKNOWN,
 	USERTOUSER,
-	RTT
+	KRT
 } latencytypes_t;
 
 typedef enum {
@@ -61,7 +61,7 @@ struct options {
 	uint8_t overwrite; // In '-f' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not append to existing file), otherwise it will be = 0 (default = 0)
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	uint8_t terminator; // Set with '-T': = 1 is the server should only terminate another server and exit, = 0 in any other normal operating condition
-	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (RTT, gettimeofday()+ioctl()), 'h' (hardware timers, only if supported)
+	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default) or 'r' (KRT, gettimeofday()+ancillary data)
 	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise (default: 0)
 	long if_index; // Interface index to be used (default: 0)
 

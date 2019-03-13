@@ -411,16 +411,16 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr
 	// -L is ignored if a bidirectional INIT packet was received (it's the client that should compute the latency, not the server)
 	if(mode_session!=UNIDIR && opts->latencyType!=USERTOUSER) {
 		fprintf(stderr,"Warning: a latency type was specified (-L), but it will be ignored.\n");
-	} else if(mode_session==UNIDIR && opts->latencyType==RTT) {
+	} else if(mode_session==UNIDIR && opts->latencyType==KRT) {
 		// Set SO_TIMESTAMP
-		// Check if the RTT mode is supported by the current NIC and set the proper socket options
+		// Check if the KRT mode is supported by the current NIC and set the proper socket options
 		if (socketSetTimestamping(sData.descriptor)<0) {
 		 	perror("socketSetTimestamping() error");
 			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
 			opts->latencyType=USERTOUSER;
 		}
 
-		// Prepare ancillary data structures, if RTT mode is selected
+		// Prepare ancillary data structures, if KRT mode is selected
 		// iovec buffers (scatter/gather arrays)
 		iov.iov_base=packet;
 		iov.iov_len=sizeof(packet);
@@ -449,8 +449,8 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr
 
 	// Start receiving packets (this is the ping-like loop)
 	while(continueFlag) {
-		// If in RTT unidirectional mode, use recvmsg(), otherwise, use recvfrom
-		if(mode_session==UNIDIR && opts->latencyType==RTT) {
+		// If in KRT unidirectional mode, use recvmsg(), otherwise, use recvfrom
+		if(mode_session==UNIDIR && opts->latencyType==KRT) {
 			saferecvmsg(rcv_bytes,sData.descriptor,&mhdr,NO_FLAGS);
 
 			// Extract ancillary data
