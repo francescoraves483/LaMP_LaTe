@@ -6,3 +6,6 @@ _site
 # Any compiled file should be ignored
 *.o
 LaTe
+
+# nohup.out file
+nohup.out
