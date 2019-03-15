@@ -56,9 +56,6 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 	// The out of order count is related here to the number of times a decreasing sequence number is detected.
 	// When the last sequence number is 65535 (UINT16_MAX), due to cyclic numbers, the expected current one is 0
 	// This should not be detected as an error, as it is the only situation in which a decreasing sequence number is expected
-
-	// [TODO] Discuss about this: in this case, only the "decreasing" trend from 65535 to 0 is detected as correct, otherwise it would
-	//        be impossible to distinguish between wrong decreasing trend and "correct (cyclic)" decreasing trend
 	if(report->_lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->_lastSeqNumber) {
 		report->outOfOrderCount++;
 	}
@@ -68,8 +65,6 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 }
 
 void printStats(reportStructure *report, FILE *stream) {
-	int latencyTypeIdx;
-
 	if(report->averageLatency==-1) {
 		// No packets have been received
 		fprintf(stream,"No packets received: \n"

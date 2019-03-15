@@ -14,12 +14,18 @@
 #define INIT_RETRY_INTERVAL_MS 100
 #define INIT_RETRY_MAX_ATTEMPTS 30
 #define CLIENT_SRCPORT 46772
+#define DEFAULT_UDP_PORT 46000
 #define MAX_PAYLOAD_SIZE_UDP_LAMP 1448 // Set to 1448 B since: 20 B (IP hdr) + 8 B (UDP hdr) + 24 B (LaMP hdr) + 1448 B (payload) = 1500 B (MTU)
 #define RAW_RX_PACKET_BUF_SIZE (ETHERMTU+14) // Ethernet MTU (1500 B) + 14 B of struct ether_header
 #define MIN_TIMEOUT_VAL_S 1000 // Minimum timeout value for the server (in ms)
 #define MIN_TIMEOUT_VAL_C 3000 // Minimum timeout value for the client (in ms)
 
-#define FILTER_OUTGOING 0 // [TODO] To be removed after the first tests
+// Default client interval/server timeout values
+#define CLIENT_DEF_INTERVAL 100 // [ms]
+#define SERVER_DEF_TIMEOUT 4000 // [ms]
+
+// Default number of packets
+#define CLIENT_DEF_NUMBER 600 // [#]
 
 // Latency types
 typedef enum {

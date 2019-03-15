@@ -50,7 +50,7 @@ static uint8_t initReceiverACKsender(struct arg_struct *args, uint64_t interval,
 static void *ackListener(void *arg);
 
 // As the report is periodically sent, a thread waits for an ACK message from the client. If it received, a proper variable is updated.
-static void *ackListener(void *arg) { // [TODO] Return rcvData - document rcvData
+static void *ackListener(void *arg) {
 	arg_struct_rx *args=(arg_struct_rx *) arg;
 	controlRCVdata rcvData;
 

@@ -42,14 +42,13 @@ static void print_long_info(void) {
 		"\n"
 
 		"[options] - Mandatory client options:\n"
-		"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at.\n"
-		"  -p <port>: specifies the port to be used. Mandatory only if protocol is UDP.\n"
 		"  -M <destination MAC address>: specifies the destination MAC address.\n"
 		"\t  Mandatory only if socket is RAW ('-r' is selected) and protocol is UDP.\n"
 		"\n"
 
 		"[options] - Optional client options:\n"
-		"  -n <total number of packets to be sent>: specifies how many packets to send (default: 10).\n"
+		"  -n <total number of packets to be sent>: specifies how many packets to send (default: %d).\n"
+		"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: %d ms).\n"
 		"  -f <filename, without extension>: print the report to a CSV file other than printing\n"
 		"\t  it on the screen.\n"
 		"\t  The default behaviour will append to an existing file; if the file does not exist,\n" 
@@ -68,15 +67,16 @@ static void print_long_info(void) {
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
+		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d).\n"
 		"\n"
 
 		"[options] - Mandatory server options:\n"
-		"  -t <timeout in ms>: specifies the timeout after which the connection should be\n"
-		"\t  considered lost (minimum value: %d ms, otherwise %d ms will be automatically set).\n"
-		"  -p <port>: specifies the port to be used. Mandatory if protocol is UDP.\n"
+		"   <none>"
 		"\n"
 
 		"[options] - Optional server options:\n"
+		"  -t <timeout in ms>: specifies the timeout after which the connection should be\n"
+		"\t  considered lost (minimum value: %d ms, otherwise %d ms will be automatically set - default: %d ms).\n"
 		"  -r: use raw sockets, if supported for the current protocol.\n"
 		"\t  When '-r' is set, the program tries to insert the LaMP timestamp in the last \n"
 		"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
@@ -91,23 +91,38 @@ static void print_long_info(void) {
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
+		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d).\n"
 		"\n"
 
 		"Example of usage:\n"
 		"Non-RAW sockets and UDP:\n"
-		"  Client (port 7000, ping-like, 100 packets, one packet every 100 ms, LaMP payload size: 700 B):\n"
-		"\t./%s -c 192.168.1.180 -p 7000 -B -u -t 100 -n 100 -P 700\n"
+		"  Client (port 7000, ping-like, 200 packets, one packet every 50 ms, LaMP payload size: 700 B, user-to-user):\n"
+		"\t./%s -c 192.168.1.180 -p 7000 -B -u -t 50 -n 200 -P 700\n"
 		"  Server (port 7000, timeout: 5000 ms):\n"
 		"\t./%s -s -p 7000 -t 5000 -u\n\n"
 		"RAW sockets and UDP:\n"
-		"  Client (port 7000, ping-like, 100 packets, one packet every 100 ms, LaMP payload size: 700 B):\n"
-		"\t./%s -c 192.168.1.180 -p 7000 -B -u -t 100 -n 100 -M D8:61:62:04:9C:A2 -P 700 -r\n"
+		"  Client (port 7000, ping-like, 200 packets, one packet every 50 ms, LaMP payload size: 700 B, user-to-user):\n"
+		"\t./%s -c 192.168.1.180 -p 7000 -B -u -t 50 -n 200 -M D8:61:62:04:9C:A2 -P 700 -r\n"
 		"  Server (port 7000, timeout: 5000 ms):\n"
 		"\t./%s -s -p 7000 -t 5000 -u -r\n\n"
+		"Non-RAW sockets and UDP, over loopback, with default options:\n"
+		"  Client (port %d, ping-like, %d packets, one packet every %d ms, LaMP payload size: 0 B, user-to-user):\n"
+		"\t./%s -m -u\n"
+		"  Server (port %d, timeout: %d ms):\n"
+		"\t./%s -l -B -u\n\n"
 
 		"The source code is available at:\n"
 		"%s\n",
-		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,GITHUB_LINK);
+		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,
+		CLIENT_DEF_NUMBER,
+		CLIENT_DEF_INTERVAL,
+		DEFAULT_UDP_PORT,
+		MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,SERVER_DEF_TIMEOUT,
+		DEFAULT_UDP_PORT,
+		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,
+		DEFAULT_UDP_PORT,CLIENT_DEF_NUMBER,CLIENT_DEF_INTERVAL,PROG_NAME_SHORT,
+		DEFAULT_UDP_PORT,SERVER_DEF_TIMEOUT,PROG_NAME_SHORT,
+		GITHUB_LINK);
 
 		fprintf(stdout,"\nAvailable interfaces (use -I <index> to bind to a specific WLAN interface,\n"
 			"or -I <index> -e to bind to a specific non-WLAN interface):\n");
@@ -138,7 +153,7 @@ void options_initialize(struct options *options) {
 	options->mode_cs=UNSET_MCS;
 	options->mode_ub=UNSET_MUB;
 	options->interval=0;
-	options->number=10;
+	options->number=CLIENT_DEF_NUMBER;
 	options->payloadlen=0;
 
 	// Initial UP is set to 'UINT8_MAX', as it should not be a valid value
@@ -149,7 +164,7 @@ void options_initialize(struct options *options) {
 
 	// IP-UDP specific (should be inserted inside a union when other protocols will be implemented)
 	options->destIPaddr.s_addr=0;
-	options->port=-1;
+	options->port=DEFAULT_UDP_PORT;
 
 	for(i=0;i<6;i++) {
 		options->destmacaddr[i]=0x00;
@@ -177,6 +192,12 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t M_flag=0; // =1 if a destination MAC address was specified. If it is not, and we are running in raw server mode, report an error
 	uint8_t L_flag=0; // =1 if a latency type was explicitely defined (with -L), otherwise = 0
 	uint8_t eI_flag=0; // =1 if either -e or -I (or both) was specified, otheriwse = 0
+	/* 
+	   The p_flag has been inserted only for future use: it is set as a port is explicitely defined. This allows to check if a port was specified
+	   for a protocol without the concept of 'port', as more protocols will be implemented in the future. In that case, it will be possible to
+	   print a warning and ignore the specified value.
+	*/
+	uint8_t p_flag=0; // =1 if a port was explicitely specified, otherwise = 0
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
 
@@ -309,8 +330,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				// print a warning and use CLIENT_SRCPORT+1
 				if(options->port==CLIENT_SRCPORT) {
 					options->port=CLIENT_SRCPORT+1;
-					fprintf(stderr,"Port cannot be equal to the client source port (%d). %ld will be used instead.\n",CLIENT_SRCPORT,options->port);
+					fprintf(stderr,"Port cannot be equal to the raw client source port (%d). %ld will be used instead.\n",CLIENT_SRCPORT,options->port);
 				}
+
+				p_flag=1;
 				break;
 
 			case 'f':
@@ -455,16 +478,68 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		exit(EXIT_SUCCESS); // Exit with SUCCESS code if -v was selected
 	}
 
+	if(options->mode_cs==UNSET_MCS) {
+		fprintf(stderr,"Error: a mode must be specified, either client (-c) or server (-s).\n");
+		print_short_info_err(options);
+	} else if(options->mode_cs==CLIENT) {
+		if(options->mode_raw==RAW && M_flag==0) {
+			fprintf(stderr,"Error: in this initial version, the raw client requires the destionation MAC address too (with -M).\n");
+			print_short_info_err(options);
+		}
+		if(options->protocol==UDP && options->destIPaddr.s_addr==0) {
+			fprintf(stderr,"Error: when in UDP client mode, an IP address should be correctly specified.\n");
+			print_short_info_err(options);
+		}
+		if(options->mode_ub==UNSET_MUB) {
+			fprintf(stderr,"Error: in client mode either ping-like (-B) or unidirectional (-U) communication should be specified.\n");
+			print_short_info_err(options);
+		}
+	} else if(options->mode_cs==SERVER) {
+		if(options->mode_ub!=UNSET_MUB) {
+			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
+		}
+	} else if(options->mode_cs==LOOPBACK_CLIENT) {
+		if(eI_flag==1) {
+			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
+			print_short_info_err(options);
+		}
+		if(options->mode_raw==RAW) {
+			fprintf(stderr,"Error: raw sockets are not supported in loopback clients.\n");
+			print_short_info_err(options);
+		}
+		if(options->mode_ub==UNSET_MUB) {
+			fprintf(stderr,"Error: in loopback client mode either ping-like (-B) or unidirectional (-U) communication should be specified.\n");
+			print_short_info_err(options);
+		}
+	} else if(options->mode_cs==LOOPBACK_SERVER) {
+		if(eI_flag==1) {
+			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
+			print_short_info_err(options);
+		}
+		if(options->mode_raw==RAW) {
+			fprintf(stderr,"Error: raw sockets are not supported in loopback servers.\n");
+			print_short_info_err(options);
+		}
+		if(options->mode_ub!=UNSET_MUB) {
+			fprintf(stderr,"Warning: -B or -U was specified, but in loopback server (-m) mode these parameters are ignored.\n");
+		}
+	}
+
+	if(options->interval==0) {
+		if(options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) {
+			// Set the default periodicity value if no explicit value was defined
+			options->interval=CLIENT_DEF_INTERVAL;
+		} else if(options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER) {
+			// Set the default timeout value if no explicit value was defined
+			options->interval=SERVER_DEF_TIMEOUT;
+		}
+	}
+
 	// Important note: when adding futher protocols that cannot support, somehow, raw sockets, always check for -r not being set
 
 	// Check for -L and -B/-U consistency (-L supported only with -B in clients, -L supported only with -U in servers, otherwise, it is ignored)
 	if(L_flag==1 && (options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) && options->mode_ub!=PINGLIKE) {
 		fprintf(stderr,"Error: latency type can be specified only when the client is working in ping-like mode (-B).\n");
-		print_short_info_err(options);
-	}
-
-	if(options->interval==0) {
-		fprintf(stderr,"Error: unspecified or zero interval/timeout. This is not supported.\n");
 		print_short_info_err(options);
 	}
 
@@ -487,65 +562,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	if(options->filename!=NULL && options->mode_cs==SERVER) {
 		fprintf(stderr,"Error: '-f' is client-only, since only the client can print reports in the current version.\n");
 		print_short_info_err(options);
-	}
-
-	if(options->mode_cs==UNSET_MCS) {
-		fprintf(stderr,"Error: a mode must be specified, either client (-c) or server (-s).\n");
-		print_short_info_err(options);
-	} else if(options->mode_cs==CLIENT) {
-		if(options->mode_raw==RAW && M_flag==0) {
-			fprintf(stderr,"Error: in this initial version, the raw client requires the destionation MAC address too (with -M).\n");
-			print_short_info_err(options);
-		}
-		if(options->protocol==UDP && (options->destIPaddr.s_addr==0 || options->port==-1)) {
-			fprintf(stderr,"Error: when in UDP client mode, both an IP address and a port shold be correctly specified.\n");
-			print_short_info_err(options);
-		}
-		if(options->mode_ub==UNSET_MUB) {
-			fprintf(stderr,"Error: in client mode either ping-like (-B) or unidirectional (-U) communication should be specified.\n");
-			print_short_info_err(options);
-		}
-	} else if(options->mode_cs==SERVER) {
-		if(options->protocol==UDP && options->port==-1) {
-			fprintf(stderr,"Error: when in UDP server mode, a port shold be correctly specified.\n");
-			print_short_info_err(options);
-		}
-		if(options->mode_ub!=UNSET_MUB) {
-			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
-		}
-	} else if(options->mode_cs==LOOPBACK_CLIENT) {
-		if(eI_flag==1) {
-			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
-			print_short_info_err(options);
-		}
-		if(options->mode_raw==RAW) {
-			fprintf(stderr,"Error: raw sockets are not supported in loopback clients.\n");
-			print_short_info_err(options);
-		}
-		if(options->protocol==UDP && options->port==-1) {
-			fprintf(stderr,"Error: when in UDP loopback client mode, a port shold be correctly specified.\n");
-			print_short_info_err(options);
-		}
-		if(options->mode_ub==UNSET_MUB) {
-			fprintf(stderr,"Error: in loopback client mode either ping-like (-B) or unidirectional (-U) communication should be specified.\n");
-			print_short_info_err(options);
-		}
-	} else if(options->mode_cs==LOOPBACK_SERVER) {
-		if(eI_flag==1) {
-			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
-			print_short_info_err(options);
-		}
-		if(options->mode_raw==RAW) {
-			fprintf(stderr,"Error: raw sockets are not supported in loopback servers.\n");
-			print_short_info_err(options);
-		}
-		if(options->protocol==UDP && options->port==-1) {
-			fprintf(stderr,"Error: when in UDP loopback server mode, a port shold be correctly specified.\n");
-			print_short_info_err(options);
-		}
-		if(options->mode_ub!=UNSET_MUB) {
-			fprintf(stderr,"Warning: -B or -U was specified, but in loopback server (-m) mode these parameters are ignored.\n");
-		}
 	}
 
 	// Print a warning in case a MAC address was specified with -M in UDP non raw mode, as the MAC is obtained through ARP and this argument will be ignored
