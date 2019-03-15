@@ -102,11 +102,8 @@ Then, client and sever specific options should be specified, according to the fo
 | -p | Port, integer, *> 0* and *< 65535* | Specifies the port to be used. Can be specified only if protocol is UDP. | 46000 |
 
 
-### Mandatory server options (none)
-
-| Argument | Value | Description | Default value |
-| -------- | ----- | ----------- | ------------- |
-| - | - | - | - |
+### Mandatory server options
+**None**
 
 
 ### Optional server options
