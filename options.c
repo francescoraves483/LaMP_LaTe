@@ -107,9 +107,9 @@ static void print_long_info(void) {
 		"\t./%s -s -p 7000 -t 5000 -u -r\n\n"
 		"Non-RAW sockets and UDP, over loopback, with default options:\n"
 		"  Client (port %d, ping-like, %d packets, one packet every %d ms, LaMP payload size: 0 B, user-to-user):\n"
-		"\t./%s -m -u\n"
+		"\t./%s -l -B -u\n"
 		"  Server (port %d, timeout: %d ms):\n"
-		"\t./%s -l -B -u\n\n"
+		"\t./%s -m -u\n\n"
 
 		"The source code is available at:\n"
 		"%s\n",
