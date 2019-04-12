@@ -262,7 +262,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 		if(opts->overwrite || !fileAlreadyExists) {
 			// Recreate CSV first line
-			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-s,LatencyType,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,OutOfOrderCountDecr,ConfInt90,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
+			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-s,LatencyType,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
 		}
 
 		// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
@@ -300,7 +300,8 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%.3f,"					// maxLatency
 			"%.3f,"					// avgLatency
 			"%.2f,"					// lost packets (perc)
-			"%" PRIu64 ",",			// out-of-order count
+			"%" PRIu64 ","			// out-of-order count
+			"%.4f,",				// standard deviation
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
 			opts->number,																											// total number of packets requested
@@ -310,15 +311,16 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			((double) report->maxLatency)/1000,																						// maxLatency
 			report->minLatency==UINT64_MAX ? report->averageLatency/1000 : 0,														// avgLatency
 			lostPktPerc,																											// lost packets (perc)
-			report->outOfOrderCount);																								// Out-of-order count
+			report->outOfOrderCount,																								// Out-of-order count
+			sqrt(report->variance)/1000);																							// standard deviation (sqrt of variance)
 
 		// Save confidence intervals data
 		for(int i=0;i<CONFINT_NUMBER;i++) {
 			dprintf(csvfp,
 				"%.3f,"
 				"%.3f",
-				report->averageLatency-report->confidenceIntervalDev[i],
-				report->averageLatency+report->confidenceIntervalDev[i]);
+				(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+				(report->averageLatency+report->confidenceIntervalDev[i])/1000);
 
 			if(i<CONFINT_NUMBER-1) {
 				dprintf(csvfp,",");
