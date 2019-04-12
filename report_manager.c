@@ -107,6 +107,8 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 	report->packetCount=0;
 	report->totalPackets=totalPackets;
 
+	report->variance=0;
+
 	// Internal members
 	report->_isFirstUpdate=1;
 
@@ -153,7 +155,9 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 
 	// Compute the current variance (std dev squared) value using Welford's online algorithm
 	report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
-	report->variance=report->_welfordM2/(report->packetCount-1);
+	if(report->packetCount>1) {
+		report->variance=report->_welfordM2/(report->packetCount-1);
+	}
 }
 
 void reportStructureFinalize(reportStructure *report) {
