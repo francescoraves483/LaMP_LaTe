@@ -5,7 +5,7 @@
 #include <netinet/in.h>
 #include "Rawsock_lib/rawsock_lamp.h" // In order to import the definition of protocol_t
 
-#define VALID_OPTS "hut:n:c:df:svlmop:reA:BM:P:UL:I:"
+#define VALID_OPTS "hut:n:c:df:svlmop:reA:BC:M:P:UL:I:"
 #define SUPPORTED_PROTOCOLS "[-u]"
 #define INIT_CODE 0xAB
 
@@ -26,6 +26,9 @@
 
 // Default number of packets
 #define CLIENT_DEF_NUMBER 600 // [#]
+
+// Default confidence interval mask
+#define DEF_CONFIDENCE_INTERVAL_MASK 2
 
 // Latency types
 typedef enum {
@@ -70,6 +73,7 @@ struct options {
 	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default) or 'r' (KRT, gettimeofday()+ancillary data)
 	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise (default: 0)
 	long if_index; // Interface index to be used (default: 0)
+	uint8_t confidenceIntervalMask; // Confidence interval mask: a user shall specify xx1 to print the .90 intervals, x1x for the .95 ones and 1xx for the .99 ones (default .95 only)
 
 	// Consider adding a union here when other protocols will be added...
 	struct in_addr destIPaddr;

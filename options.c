@@ -68,6 +68,9 @@ static void print_long_info(void) {
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d).\n"
+		"  -C <confidence interval mask>: specifies an integer (mask) telling the program which confidence\n"
+		"\t  intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99\n"
+		"\t  7=.90/.95/.99 (default: %d).\n"
 		"\n"
 
 		"[options] - Mandatory server options:\n"
@@ -113,16 +116,16 @@ static void print_long_info(void) {
 
 		"The source code is available at:\n"
 		"%s\n",
-		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,
-		CLIENT_DEF_NUMBER,
-		CLIENT_DEF_INTERVAL,
-		DEFAULT_UDP_PORT,
-		MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,SERVER_DEF_TIMEOUT,
-		DEFAULT_UDP_PORT,
-		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,
-		DEFAULT_UDP_PORT,CLIENT_DEF_NUMBER,CLIENT_DEF_INTERVAL,PROG_NAME_SHORT,
-		DEFAULT_UDP_PORT,SERVER_DEF_TIMEOUT,PROG_NAME_SHORT,
-		GITHUB_LINK);
+		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Basic help
+		CLIENT_DEF_NUMBER, // Optional client options
+		CLIENT_DEF_INTERVAL, // Optional client options
+		DEFAULT_UDP_PORT,DEF_CONFIDENCE_INTERVAL_MASK, // Optional client options
+		MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,SERVER_DEF_TIMEOUT, // Optional server options
+		DEFAULT_UDP_PORT, // Optional server options
+		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Example of usage
+		DEFAULT_UDP_PORT,CLIENT_DEF_NUMBER,CLIENT_DEF_INTERVAL,PROG_NAME_SHORT, // Example of usage
+		DEFAULT_UDP_PORT,SERVER_DEF_TIMEOUT,PROG_NAME_SHORT, // Example of usage
+		GITHUB_LINK); // Source code link
 
 		fprintf(stdout,"\nAvailable interfaces (use -I <index> to bind to a specific WLAN interface,\n"
 			"or -I <index> -e to bind to a specific non-WLAN interface):\n");
@@ -182,6 +185,8 @@ void options_initialize(struct options *options) {
 
 	options->nonwlan_mode=0;
 	options->if_index=0;
+
+	options->confidenceIntervalMask=0x02; // Binary 010 as default value: i.e. print only .95 confidence intervals
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -192,6 +197,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t M_flag=0; // =1 if a destination MAC address was specified. If it is not, and we are running in raw server mode, report an error
 	uint8_t L_flag=0; // =1 if a latency type was explicitely defined (with -L), otherwise = 0
 	uint8_t eI_flag=0; // =1 if either -e or -I (or both) was specified, otheriwse = 0
+	uint8_t C_flag=0; // =1 if -C was specified, otheriwise = 0
 	/* 
 	   The p_flag has been inserted only for future use: it is set as a port is explicitely defined. This allows to check if a port was specified
 	   for a protocol without the concept of 'port', as more protocols will be implemented in the future. In that case, it will be possible to
@@ -214,10 +220,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				break;
 
 			case 'u':
-				fprintf(stdout,"Note: using normal UDP sockets, it is not possible to send packets\n"
-					"\t over the loopback interface, as the program binds to wireless interfaces only.\n"
-					"\t You can, however, send packets to yourself (using your own IP address), to get\n"
-					"\t a very similar effect with respect to using loopback.\n");
 				options->protocol=UDP;
 				break;
 
@@ -395,6 +397,19 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				}
 				break;
 
+			case 'C':
+				errno=0; // Setting errno to 0 as suggested in the strtol() man page
+				options->confidenceIntervalMask=strtoul(optarg,&sPtr,0);
+				if(sPtr==optarg) {
+					fprintf(stderr,"Cannot find any digit in the specified mask.\n");
+					print_short_info_err(options);
+				} else if(errno || options->confidenceIntervalMask>0x07) {
+					fprintf(stderr,"Error in parsing the mask specified after -C.\n");
+					print_short_info_err(options);
+				}
+				C_flag=1;
+				break;
+
 			case 'M':
 				if(sscanf(optarg,SCN_MAC,MAC_SCANNER(values))!=6) {
 					fprintf(stderr,"Error when reading the destination MAC address after -M.\n");
@@ -498,6 +513,9 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(options->mode_ub!=UNSET_MUB) {
 			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
 		}
+		if(C_flag==1) {
+			fprintf(stderr,"Warning: -C is a client-only option. It will be ignored.\n");
+		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
 			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
@@ -522,6 +540,9 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(options->mode_ub!=UNSET_MUB) {
 			fprintf(stderr,"Warning: -B or -U was specified, but in loopback server (-m) mode these parameters are ignored.\n");
+		}
+		if(C_flag==1) {
+			fprintf(stderr,"Warning: -C is a client-only option. It will be ignored.\n");
 		}
 	}
 

@@ -653,7 +653,8 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, char *devname, macaddr
 	with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
 	fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
 	// Print the statistics, if no error, before returning
-	printStats(&reportData,stdout);
+	reportStructureFinalize(&reportData);
+	printStats(&reportData,stdout,opts->confidenceIntervalMask);
 
 	if(opts->filename!=NULL) {
 		// If '-f' was specified, print the report data to a file too
