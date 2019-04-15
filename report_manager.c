@@ -171,11 +171,6 @@ void reportStructureFinalize(reportStructure *report) {
 	// Compute confidence intervals using Student's T distribution
 	for(int i=0;i<CONFINT_NUMBER;i++) {
 		report->confidenceIntervalDev[i]=tsCalculator(report->packetCount-1,i)*stderr;
-
-		// In case of a negative value, which would be meaningless, set confidenceIntervalDev=0
-		if(report->confidenceIntervalDev[i]<0) {
-			report->confidenceIntervalDev[i]=0;
-		}
 	}
 }
 
@@ -214,7 +209,7 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 			if(confidenceIntervalsMask & (1<<i)) {
 				fprintf(stream,"Confidence intervals (%s): [%.3f ; %.3f] ms\n",
 					confidenceIntervalLabels[i],
-					(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+					report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
 					(report->averageLatency+report->confidenceIntervalDev[i])/1000);
 			}
 		}
@@ -330,7 +325,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			dprintf(csvfp,
 				"%.3f,"
 				"%.3f",
-				(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+				report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
 				(report->averageLatency+report->confidenceIntervalDev[i])/1000);
 
 			if(i<CONFINT_NUMBER-1) {
