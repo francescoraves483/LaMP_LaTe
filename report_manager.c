@@ -74,17 +74,19 @@ static double tsCalculator(int dof, int intervalIndex) {
 		return -1.0;
 	}
 
-	if(dof>=arraysize) {
-			baseval=truncf(array[arraysize-1]*1000)/1000;
-			for(int i=0;i<arraythrssize && ts==-1;i++) {
-				if(i==arraythrssize-1) {
-					ts=baseval-TSTUDTHRS_INCR*i;
-				} else if(dof>arraythrs[i] && dof<=arraythrs[i+1]) {
-					ts=baseval-TSTUDTHRS_INCR*i;
-				}
+	if(dof<=0) { // Safety check
+		ts=0.0;
+	} else if(dof>=arraysize) {
+		baseval=truncf(array[arraysize-1]*1000)/1000;
+		for(int i=0;i<arraythrssize && ts==-1;i++) {
+			if(i==arraythrssize-1) {
+				ts=baseval-TSTUDTHRS_INCR*i;
+			} else if(dof>arraythrs[i] && dof<=arraythrs[i+1]) {
+				ts=baseval-TSTUDTHRS_INCR*i;
 			}
-		} else {
-			ts=array[dof-1];
+		}
+	} else {
+		ts=array[dof-1];
 	}
 
 	return ts;
@@ -168,7 +170,7 @@ void reportStructureFinalize(reportStructure *report) {
 
 	// Compute confidence intervals using Student's T distribution
 	for(int i=0;i<CONFINT_NUMBER;i++) {
-		report->confidenceIntervalDev[i]=tsCalculator(report->packetCount,i)*stderr;
+		report->confidenceIntervalDev[i]=tsCalculator(report->packetCount-1,i)*stderr;
 	}
 }
 
