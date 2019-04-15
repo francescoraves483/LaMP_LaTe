@@ -171,6 +171,11 @@ void reportStructureFinalize(reportStructure *report) {
 	// Compute confidence intervals using Student's T distribution
 	for(int i=0;i<CONFINT_NUMBER;i++) {
 		report->confidenceIntervalDev[i]=tsCalculator(report->packetCount-1,i)*stderr;
+
+		// In case of a negative value, which would be meaningless, set confidenceIntervalDev=0
+		if(report->confidenceIntervalDev[i]<0) {
+			report->confidenceIntervalDev[i]=0;
+		}
 	}
 }
 
