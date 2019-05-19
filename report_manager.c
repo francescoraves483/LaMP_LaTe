@@ -315,7 +315,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			latencyTypePrinter(report->latencyType),																				// latency type (-L)
 			report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,												// minLatency
 			((double) report->maxLatency)/1000,																						// maxLatency
-			report->minLatency==UINT64_MAX ? report->averageLatency/1000 : 0,														// avgLatency
+			report->minLatency==UINT64_MAX ? 0 : report->averageLatency/1000,														// avgLatency
 			lostPktPerc,																											// lost packets (perc)
 			report->outOfOrderCount,																								// Out-of-order count
 			sqrt(report->variance)/1000);																							// standard deviation (sqrt of variance)
