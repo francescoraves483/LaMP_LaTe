@@ -1,8 +1,8 @@
 #ifndef LATENCYTEST_VERSION_H_INCLUDED
 #define LATENCYTEST_VERSION_H_INCLUDED
 	
-#define VERSION "0.1.2-beta-development"
-#define DATE "20190412a"
+#define VERSION "0.1.3-beta-development"
+#define DATE "20190530a"
 #define PROG_NAME_LONG "LaTe utility"
 #define PROG_NAME_SHORT "LaTe"
 #define GITHUB_LINK "https://github.com/francescoraves483/LaMP_LaTe"
