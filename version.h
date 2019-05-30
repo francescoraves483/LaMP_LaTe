@@ -1,7 +1,7 @@
 #ifndef LATENCYTEST_VERSION_H_INCLUDED
 #define LATENCYTEST_VERSION_H_INCLUDED
 	
-#define VERSION "0.1.3-beta"
+#define VERSION "0.1.4-beta-development"
 #define DATE "20190530a"
 #define PROG_NAME_LONG "LaTe utility"
 #define PROG_NAME_SHORT "LaTe"
