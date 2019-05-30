@@ -8,12 +8,12 @@
 #include <time.h>
 #include <math.h>
 
-// Condidence interval array sizes (generated using MATLAB)
+// Condidence interval array sizes
 #define TSTUDSIZE90 95
 #define TSTUDSIZE95 125
 #define TSTUDSIZE99 196
 
-// Condidence interval thresholds array sizes (generated using MATLAB)
+// Condidence interval thresholds array sizes
 #define TSTUDSIZE90THRS 9
 #define TSTUDSIZE95THRS 13
 #define TSTUDSIZE99THRS 20

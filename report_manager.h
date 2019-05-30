@@ -45,7 +45,7 @@ typedef struct reportStructure {
 	double _welfordAverageLatencyOld;	// us - not transmitted/not printed
 
 	// Finalize-only member: they are used to print statistics, but they are not transmitted
-	double confidenceIntervalDev[3];  // us - not transmitted
+	double confidenceIntervalDev[3];  // us - not transmitted (confidence interval deviation from mean value)
 } reportStructure;
 
 void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType);
