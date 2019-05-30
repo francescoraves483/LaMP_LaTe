@@ -5,7 +5,7 @@
 
 ## What is LaTe?
 
-**LaTe** is a flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.2-beta_.
+**LaTe** is a flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.3-beta_.
 
 This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
 
@@ -43,7 +43,7 @@ The executable is called `LaTe`.
 
 The full LaMP specifications can be found here: [LaMP specifications, revision 1.0](./LaMP/LaMP_specifications_rev1.0.pdf).
 
-# LaTe user guide (v0.1.2-beta+)
+# LaTe user guide (v0.1.3-beta+)
 
 ## Modes
 
@@ -100,7 +100,7 @@ Then, client and sever specific options should be specified, according to the fo
 | -I | Interface index (returned by the _-h_ option) | Internal index of the interface to be used for the latency measurement session. | 0 |
 | -e | - | Bind to a non-wireless interface instead of looking for wireless interfaces. | (wireless) |
 | -p | Port, integer, *> 0* and *< 65535* | Specifies the port to be used. Can be specified only if protocol is UDP. | 46000 |
-
+| -C | Confidence interval mask, 3 bit integer value from 0 to 7 | Specifies an integer telling the program which confidence intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99, 7=.90/.95/.99) | 2 ((bin) 010) |
 
 ### Mandatory server options
 **None**
@@ -163,6 +163,7 @@ Few important notes about **LaTe** are listed below:
 - Specifying a port is required when working with LaMP over UDP (i.e. when using the *-u* option). If no port is specified, the program will use `46000` as default value.
 - The server will adapt its mode (ping-like or unidirectional) depending on the packets it receives from the client. Therefore, specifying *-B* or *-U* for a server will have no effect.
 - When in non-raw mode, the destination MAC address is not required. If specified with *-M*, however, it won’t generate an error, but it will be simply ignored by LaTe.
+- Even though it is possible to choose which confidence intervals to display, through option *-C*, a CSV file will always contain all of them (.90, .95 and .99).
 
 ## Latency types
 
@@ -207,7 +208,7 @@ After giving the termination command, the current session will run until it will
 
 # Version information
 
-The current version is **0.1.2-beta**, using **LaMP rev 1.0** and **Rawsock library v0.2.1**.
+The current version is **0.1.3-beta**, using **LaMP rev 1.0** and **Rawsock library v0.2.1**.
 
 Developed in **Politecnico di Torino**, licensed under **GPLv2**.
 
