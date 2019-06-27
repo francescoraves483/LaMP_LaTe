@@ -38,3 +38,9 @@ make
 The executable is called `LaTe`.
 
 \* In the current version, only **LaMP** over **IPv4** and **UDP** is supported, but we plan to implement other protocols in the future.
+
+**Docker images**
+
+Docker images are also available, launching a LaTe server in daemon mode (see the documentation for more information). You can download them from [DockerHub](https://hub.docker.com/u/francescoraves483).
+
+At the moment two images are available: one for testing over wired interfaces and one for testing over wireless interfaces.
