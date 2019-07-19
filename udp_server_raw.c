@@ -1,7 +1,7 @@
 #include "udp_server_raw.h"
 #include "report_manager.h"
 #include "packet_structs.h"
-#include "timeval_subtract.h"
+#include "timeval_utils.h"
 #include <sys/ioctl.h>
 #include <linux/if.h>
 #include <linux/if.h>
@@ -42,9 +42,9 @@ static pthread_t ackListener_tid;
 static pthread_mutex_t ack_report_received_mut;
 
 // Function prototypes
-static int transmitReport(struct lampsock_data sData, char *devname, struct options *opts, struct in_addr destIP, struct in_addr srcIP, macaddr_t srcMAC, macaddr_t destMAC);
+static int transmitReport(struct lampsock_data sData, struct options *opts, struct in_addr destIP, struct in_addr srcIP, macaddr_t srcMAC, macaddr_t destMAC);
 extern inline int timevalSub(struct timeval *in, struct timeval *out);
-static uint8_t initReceiverACKsender(struct arg_struct *args, uint64_t interval, in_port_t port);
+static uint8_t initReceiverACKsender(arg_struct *args, uint64_t interval, in_port_t port);
 
 // Thread entry point functions
 static void *ackListener(void *arg);
@@ -75,7 +75,7 @@ static void *ackListener(void *arg) {
 	pthread_exit(NULL);
 }
 
-static uint8_t initReceiverACKsender(struct arg_struct *args, uint64_t interval, in_port_t port) {
+static uint8_t initReceiverACKsender(arg_struct *args, uint64_t interval, in_port_t port) {
 	controlRCVdata rcvData;
 	uint8_t return_val=0; // = 0 is everything is ok, = 1 if an error occurred
 	int controlRcvRetValue, controlSendRetValue;
@@ -108,9 +108,9 @@ static uint8_t initReceiverACKsender(struct arg_struct *args, uint64_t interval,
 
 		lamp_id_session=rcvData.controlRCV.session_id;
 
-		if(rcvData.controlRCV.conn_idx==INIT_UNIDIR_INDEX) {
+		if(rcvData.controlRCV.type_idx==INIT_UNIDIR_INDEX) {
 			mode_session=UNIDIR;
-		} else if(rcvData.controlRCV.conn_idx==INIT_PINGLIKE_INDEX) {
+		} else if(rcvData.controlRCV.type_idx==INIT_PINGLIKE_INDEX) {
 			mode_session=PINGLIKE;
 		} else {
 			mode_session=UNSET_MUB;
@@ -133,7 +133,7 @@ static uint8_t initReceiverACKsender(struct arg_struct *args, uint64_t interval,
 			}
 
 			// Send ACK
-			controlSendRetValue=controlSenderUDP_RAW(args, &rcvData, lamp_id_session, 1, ACK, 0, NULL, NULL);
+			controlSendRetValue=controlSenderUDP_RAW(args,&rcvData,lamp_id_session,1,ACK,0,0,NULL,NULL);
 			if(controlSendRetValue<0) {
 				// Set error
 				if(controlSendRetValue==-1) {
@@ -153,7 +153,7 @@ static uint8_t initReceiverACKsender(struct arg_struct *args, uint64_t interval,
 	return return_val;
 }
 
-static int transmitReport(struct lampsock_data sData, char *devname, struct options *opts, struct in_addr destIP, struct in_addr srcIP, macaddr_t srcMAC, macaddr_t destMAC) {
+static int transmitReport(struct lampsock_data sData, struct options *opts, struct in_addr destIP, struct in_addr srcIP, macaddr_t srcMAC, macaddr_t destMAC) {
 	// Packet buffers and headers
 	struct pktheaders_udp headers;
 	struct pktbuffers_udp buffers;
@@ -200,7 +200,7 @@ static int transmitReport(struct lampsock_data sData, char *devname, struct opti
 	// Populating headers
 	// [IMPROVEMENT] Future improvement: get destination MAC through ARP or broadcasted information and not specified by the user
 	etherheadPopulate(&(headers.etherHeader), srcMAC, destMAC, ETHERTYPE_IP);
-	IP4headPopulateS(&(headers.ipHeader), devname, destIP, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	IP4headPopulateS(&(headers.ipHeader), sData.devname, destIP, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
 	UDPheadPopulate(&(headers.udpHeader), opts->port, client_port_session);
 
 	// Copying the report string inside the report buffer
@@ -309,8 +309,8 @@ static int transmitReport(struct lampsock_data sData, char *devname, struct opti
 // This also makes the code simpler.
 // It basically works as the client's UDP Tx Loop, but inserted within the main function, with some if-else statements
 // to discriminate the pinglike and unidirectional communications, making the common portion of the code to be written only once
-unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts) {
-	struct arg_struct args;
+unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts) {
+	arg_struct args;
 
 	// Packet buffer with size = Ethernet MTU
 	byte_t packet[RAW_RX_PACKET_BUF_SIZE];
@@ -355,7 +355,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr
 	char ctrlBuf[CMSG_SPACE(sizeof(struct timeval))];
 
 	// struct in_addr containing the destination IP address (read as source IP address from the packets coming from the client)
-	// To be passed as argument to transmitReport()ù
+	// To be passed as argument to transmitReport()
 	struct in_addr destIP_inaddr;
 
 	// struct sockaddr_ll filled by recvfrom() and used to filter out outgoing traffic
@@ -391,7 +391,6 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr
 	// Populate the 'args' struct
 	args.sData=sData;
 	args.opts=opts;
-	args.devname=devname;
 	args.srcMAC=srcMAC;
 	args.srcIP=srcIP;
 
@@ -414,7 +413,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr
 	} else if(mode_session==UNIDIR && opts->latencyType==KRT) {
 		// Set SO_TIMESTAMP
 		// Check if the KRT mode is supported by the current NIC and set the proper socket options
-		if (socketSetTimestamping(sData.descriptor)<0) {
+		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW)<0) {
 		 	perror("socketSetTimestamping() error");
 			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
 			opts->latencyType=USERTOUSER;
@@ -587,7 +586,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr
 		destIP_inaddr.s_addr=headerptrs.ipHeader->saddr;
 		// If the mode is the unidirectional one, get the destination IP/MAC from the last packet
 		// Use as destination IP (destIP), the source IP of the last received packet (headerptrs.ipHeader->saddr)
-		if(transmitReport(sData, devname, opts, destIP_inaddr, srcIP, srcMAC, srcmacaddr_pkt)) {
+		if(transmitReport(sData, opts, destIP_inaddr, srcIP, srcMAC, srcmacaddr_pkt)) {
 			fprintf(stderr,"UDP server reported an error while transmitting the report.\n"
 				"No report will be transmitted.\n");
 			CLEAR_ALL();

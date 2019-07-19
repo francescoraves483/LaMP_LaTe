@@ -15,7 +15,7 @@ Return values:
 -1: invalid argument
 -2: sendto() error: cannot send packet
 */
-int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts, lamptype_t type, time_t interval_ms, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex) {
+int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts, lamptype_t type, uint16_t followup_type, time_t interval_ms, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex) {
 	struct lamphdr lampHeader;
 	int counter=0;
 
@@ -29,7 +29,7 @@ int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts
 	// Return value of poll()
 	int poll_retval=1;
 
-	if(max_attempts<=0 || (type!=INIT && type!=ACK)) {
+	if(max_attempts<=0 || (type!=INIT && type!=ACK && type!=FOLLOWUP_CTRL) || (type==FOLLOWUP_CTRL && !IS_FOLLOWUP_CTRL_TYPE_VALID(followup_type))) {
 		return -1;
 	}
 
@@ -49,12 +49,14 @@ int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts
 		max_attempts=1;
 	}
 
-	lampHeadPopulate(&lampHeader, TYPE_TO_CTRL(type), session_id, 0); // Sequence number, starting from 0, is used only if multiple packets are sentù
+	lampHeadPopulate(&lampHeader, TYPE_TO_CTRL(type), session_id, 0); // Sequence number, starting from 0, is used only if multiple packets are sent
 	if(type==INIT) {
-		lampHeadSetConnType(&lampHeader, args->opts->mode_ub);
+		lampHeadSetConnType(&lampHeader,args->opts->mode_ub);
+	} else if(type==FOLLOWUP_CTRL) {
+		lampHeadSetFollowupCtrlType(&lampHeader,followup_type);
 	}
 
-	if(type==ACK) {
+	if(max_attempts==1) {
 		if(sendto(args->sData.descriptor,&lampHeader,LAMP_HDR_SIZE(),NO_FLAGS,(struct sockaddr *)&(args->sData.addru.addrin[1]),sizeof(struct sockaddr_in))!=LAMP_HDR_SIZE()) {
 			return -2;
 		}
@@ -98,7 +100,7 @@ Return values:
 -2: sendto() error: cannot send packet
 -3: malloc() error: cannot allocate memory
 */
-int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t session_id, int max_attempts, lamptype_t type, time_t interval_ms, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex) {
+int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t session_id, int max_attempts, lamptype_t type, uint16_t followup_type, time_t interval_ms, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex) {
 	// Packet buffers and headers
 	struct pktheaders_udp headers;
 	struct pktbuffers_udp buffers = {NULL, NULL, NULL, NULL};
@@ -122,7 +124,7 @@ int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t ses
 	// Return value of poll()
 	int poll_retval=1;
 
-	if(max_attempts<=0 || (type!=INIT && type!=ACK)) {
+	if(max_attempts<=0 || (type!=INIT && type!=ACK && type!=FOLLOWUP_CTRL) || (type==FOLLOWUP_CTRL && !IS_FOLLOWUP_CTRL_TYPE_VALID(followup_type))) {
 		return -1;
 	}
 
@@ -145,11 +147,13 @@ int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t ses
 	// Populating headers
 	// [IMPROVEMENT] Future improvement: get destination MAC through ARP or broadcasted information and not specified by the user
 	etherheadPopulate(&(headers.etherHeader), args->srcMAC, rcvData->controlRCV.mac, ETHERTYPE_IP);
-	IP4headPopulateS(&(headers.ipHeader), args->devname, rcvData->controlRCV.ip, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, rcvData->controlRCV.ip, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
 	UDPheadPopulate(&(headers.udpHeader), args->opts->mode_cs==CLIENT ? rcvData->controlRCV.port : args->opts->port, args->opts->mode_cs==CLIENT ? args->opts->port : rcvData->controlRCV.port);
 	lampHeadPopulate(&(headers.lampHeader), TYPE_TO_CTRL(type), session_id, 0); // Starting from sequence number = 0
 	if(type==INIT) {
 		lampHeadSetConnType(&(headers.lampHeader), args->opts->mode_ub);
+	} else if(type==FOLLOWUP_CTRL) {
+		lampHeadSetFollowupCtrlType(&(headers.lampHeader),followup_type);
 	}
 
 	// Allocating packet buffers (without payload - as an ACK is sent and it does not require any payload)
@@ -184,7 +188,7 @@ int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t ses
 	IP4Encapsulate(buffers.ippacket, &(headers.ipHeader), buffers.udppacket, UDP_PACKET_SIZE_S(LAMP_HDR_SIZE()));
 	finalpktsize=etherEncapsulate(buffers.ethernetpacket, &(headers.etherHeader), buffers.ippacket, IP_UDP_PACKET_SIZE_S(LAMP_HDR_SIZE()));
 
-	if(type==ACK) {
+	if(max_attempts==1) {
 		if(rawLampSend(args->sData.descriptor, args->sData.addru.addrll, inpacket_lamphdr, buffers.ethernetpacket, finalpktsize, FLG_NONE, UDP)) {
 			return -2;
 		}
@@ -245,13 +249,13 @@ int controlReceiverUDP(int sFd, controlRCVdata *rcvData, lamptype_t type, uint8_
 	struct lamphdr *lampHeaderPtr=(struct lamphdr *) lampPacket;
 
 	// LaMP relevant fields
-	uint16_t lamp_conn_idx;
+	uint16_t lamp_type_idx;
 	lamptype_t lamp_type_rx;
 	uint16_t lamp_id_rx;
 
 	ssize_t rcv_bytes;
 
-	if((type!=INIT && type!=ACK) || rcvData==NULL) {
+	if((type!=INIT && type!=ACK && type!=FOLLOWUP_CTRL) || rcvData==NULL) {
 		return -1;
 	}
 
@@ -273,7 +277,7 @@ int controlReceiverUDP(int sFd, controlRCVdata *rcvData, lamptype_t type, uint8_
 		}
 
 		// If the packet is really a LaMP packet, get the header data
-		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, NULL, &lamp_conn_idx, NULL, NULL);
+		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, NULL, &lamp_type_idx, NULL, NULL);
 
 		// Discard any LaMP packet which is not of interest
 		if(lamp_type_rx!=type) {
@@ -284,12 +288,12 @@ int controlReceiverUDP(int sFd, controlRCVdata *rcvData, lamptype_t type, uint8_
 			if(lamp_id_rx!=rcvData->session_id) {
 				continue;
 			}
-		} else if(type==INIT && IS_INIT_INDEX_VALID(lamp_conn_idx)) {
+		} else if((type==INIT && IS_INIT_INDEX_VALID(lamp_type_idx)) || (type==FOLLOWUP_CTRL && IS_FOLLOWUP_CTRL_TYPE_VALID(lamp_type_idx))) {
 			// If the type is INIT, populate the rcvData structure
 			rcvData->controlRCV.ip=srcAddr.sin_addr;
 			rcvData->controlRCV.port=srcAddr.sin_port;
 			rcvData->controlRCV.session_id=lamp_id_rx;
-			rcvData->controlRCV.conn_idx=lamp_conn_idx;
+			rcvData->controlRCV.type_idx=lamp_type_idx;
 		} else {
 			continue;
 		}
@@ -326,7 +330,7 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 	size_t UDPpayloadsize;
 
 	// LaMP relevant fields
-	uint16_t lamp_conn_idx;
+	uint16_t lamp_type_idx;
 	lamptype_t lamp_type_rx;
 	uint16_t lamp_id_rx;
 
@@ -384,7 +388,7 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 
 
 		// If the packet is really a LaMP packet, get the header data
-		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, NULL, &lamp_conn_idx, NULL, NULL);
+		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, NULL, &lamp_type_idx, NULL, NULL);
 
 		// Discard any LaMP packet which is not of interest
 		if(lamp_type_rx!=type) {
@@ -395,12 +399,12 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 			if(lamp_id_rx!=rcvData->session_id) {
 				continue;
 			}
-		} else if(type==INIT && IS_INIT_INDEX_VALID(lamp_conn_idx)) {
+		} else if((type==INIT && IS_INIT_INDEX_VALID(lamp_type_idx)) || (type==FOLLOWUP_CTRL && IS_FOLLOWUP_CTRL_TYPE_VALID(lamp_type_idx))) {
 			// If the type is init, populate the rcvData structure
 			rcvData->controlRCV.ip.s_addr=headerptrs.ipHeader->saddr;
 			rcvData->controlRCV.port=ntohs(headerptrs.udpHeader->source);
 			rcvData->controlRCV.session_id=lamp_id_rx;
-			rcvData->controlRCV.conn_idx=lamp_conn_idx;
+			rcvData->controlRCV.type_idx=lamp_type_idx;
 			memcpy(rcvData->controlRCV.mac,(headerptrs.etherHeader)->ether_shost,ETHER_ADDR_LEN);
 		} else {
 			continue;
@@ -417,4 +421,19 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 	}
 
 	return 0;
+}
+
+/* Send FOLLOWUP_DATA message
+Return values:
+0: message sent correctly
+1; error when sending the message
+*/
+int sendFollowUpData(struct lampsock_data sData,uint16_t id,uint16_t seq,struct timeval tDiff) {
+	struct lamphdr lampHeader;
+
+	lampHeadPopulate(&lampHeader, CTRL_FOLLOWUP_DATA, id, seq);
+
+	lampHeadSetTimestamp(&lampHeader,&tDiff);
+
+	return sendto(sData.descriptor,(byte_t *)&lampHeader,LAMP_HDR_SIZE(),NO_FLAGS,(struct sockaddr *)&(sData.addru.addrin[1]),sizeof(struct sockaddr_in))!=LAMP_HDR_SIZE();
 }

@@ -14,7 +14,7 @@
 #define CSV_EXTENSION_LEN 4 // '.csv' length
 #define CSV_EXTENSION_STR ".csv"
 
-static const char *latencyTypes[]={"Unknown","User-to-user","KRT"};
+static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Hardware timestamps"};
 
 static void print_long_info(void) {
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
@@ -87,7 +87,8 @@ static void print_long_info(void) {
 		"\t  be used (patched kernel required!).\n"
 		"  -d: set the server in 'continuous daemon mode': as a session is terminated, the server\n"
 		"\t  will be restarted and will be able to accept new packets from other clients.\n"
-		"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n"
+		"  -L <latency type: u | r | h>: select latency type: user-to-user, KRT (Kernel Receive Timestamp) or\n"
+		"\t   hardware timers (only when supported by the NIC)"
 		"\t  Default: u. Please note that the server supports this parameter only when in unidirectional mode.\n"
 		"\t  If a bidirectional INIT packet is received, the mode is completely ignored.\n"
 		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
@@ -446,8 +447,8 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					print_short_info_err(options);
 				}
 
-				if(optarg[0]!='r' && optarg[0]!='u') {
-					fprintf(stderr,"Error: valid -L options: 'u', 'r'.\n");
+				if(optarg[0]!='r' && optarg[0]!='u' && optarg[0]!='h') {
+					fprintf(stderr,"Error: valid -L options: 'u', 'r', 'h' (not supported on every NIC).\n");
 					print_short_info_err(options);
 				}
 
@@ -458,6 +459,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 					case 'r':
 						options->latencyType=KRT;
+						break;
+
+					case 'h':
+						options->latencyType=HARDWARE;
 						break;
 
 					default:
@@ -561,6 +566,12 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	// Check for -L and -B/-U consistency (-L supported only with -B in clients, -L supported only with -U in servers, otherwise, it is ignored)
 	if(L_flag==1 && (options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) && options->mode_ub!=PINGLIKE) {
 		fprintf(stderr,"Error: latency type can be specified only when the client is working in ping-like mode (-B).\n");
+		print_short_info_err(options);
+	}
+
+	// -L h cannot be specified in unidirectional mode (i.e. a server can never specify 'h' as latency type)
+	if((options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER) && options->latencyType==HARDWARE) {
+		fprintf(stderr,"Error: hardware timestamps are only supported by clients and in ping-like mode (-B).\n");
 		print_short_info_err(options);
 	}
 

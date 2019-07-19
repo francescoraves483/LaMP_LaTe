@@ -32,8 +32,14 @@ void thread_error_print(const char *name, t_error_types err) {
 		case ERR_TIMEOUT_INIT:
 			fprintf(stderr,"%s reported an error: reception timed out when waiting for a INIT packet.\n",name);
 			break;
+		case ERR_TIMEOUT_FOLLOWUP:
+			fprintf(stderr,"%s reported an error: reception timed out when waiting for a Follow-up control packet.\n",name);
+			break;
 		case ERR_SEND_ACK:
 			fprintf(stderr,"%s reported an error in sending a LaMP ACK packet.\n",name);
+			break;
+		case ERR_SEND_FOLLOWUP:
+			fprintf(stderr,"%s reported an error in sending a LaMP Follow-up request packet.\n",name);
 			break;
 		case ERR_INVALID_ARG_CMONUDP:
 			fprintf(stderr,"%s reported an error: invalid arguments in a common_udp function.\n",name);
@@ -43,6 +49,10 @@ void thread_error_print(const char *name, t_error_types err) {
 			break;
 		case ERR_RECVFROM_GENERIC:
 			fprintf(stderr,"%s reported a generic error when receiving packets, not related to any timeout.\n",name);
+			break;
+		case ERR_TXSTAMP:
+			fprintf(stderr,"%s reported an error when retrieving the TX timestamp in hardware mode. Try using another mode.\n",name);
+			break;
 		default:
 			fprintf(stderr,"%s reported a generic error.\n",name);
 			break;

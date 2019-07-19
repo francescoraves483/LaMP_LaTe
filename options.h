@@ -13,12 +13,15 @@
 #define REPORT_RETRY_MAX_ATTEMPTS 15
 #define INIT_RETRY_INTERVAL_MS 100
 #define INIT_RETRY_MAX_ATTEMPTS 30
+#define FOLLOWUP_CTRL_RETRY_INTERVAL_MS 100
+#define FOLLOWUP_CTRL_RETRY_MAX_ATTEMPTS 30
 #define CLIENT_SRCPORT 46772
 #define DEFAULT_UDP_PORT 46000
 #define MAX_PAYLOAD_SIZE_UDP_LAMP 1448 // Set to 1448 B since: 20 B (IP hdr) + 8 B (UDP hdr) + 24 B (LaMP hdr) + 1448 B (payload) = 1500 B (MTU)
 #define RAW_RX_PACKET_BUF_SIZE (ETHERMTU+14) // Ethernet MTU (1500 B) + 14 B of struct ether_header
 #define MIN_TIMEOUT_VAL_S 1000 // Minimum timeout value for the server (in ms)
 #define MIN_TIMEOUT_VAL_C 3000 // Minimum timeout value for the client (in ms)
+#define POLL_ERRQUEUE_WAIT_TIMEOUT 100 // Timeout for pollErrqueueWait() in common_socket_man.h/.c (in ms)
 
 // Default client interval/server timeout values
 #define CLIENT_DEF_INTERVAL 100 // [ms]
@@ -34,7 +37,8 @@
 typedef enum {
 	UNKNOWN,
 	USERTOUSER,
-	KRT
+	KRT,
+	HARDWARE
 } latencytypes_t;
 
 typedef enum {
@@ -50,6 +54,12 @@ typedef enum {
 	PINGLIKE,
 	UNIDIR
 } modeub_t;
+
+typedef enum {
+	FOLLOWUP_OFF,
+	FOLLOWUP_ON_SW, // For future development of a follow-up mode even without hardware timers support
+	FOLLOWUP_ON_HW
+} modefollowup_srv_t;
 
 typedef enum {
 	NON_RAW,
@@ -70,7 +80,7 @@ struct options {
 	uint8_t overwrite; // In '-f' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not append to existing file), otherwise it will be = 0 (default = 0)
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	uint8_t terminator; // Set with '-T': = 1 is the server should only terminate another server and exit, = 0 in any other normal operating condition
-	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default) or 'r' (KRT, gettimeofday()+ancillary data)
+	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (KRT, gettimeofday()+ancillary data), 'h' (hardware timestamps when supported)
 	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise (default: 0)
 	long if_index; // Interface index to be used (default: 0)
 	uint8_t confidenceIntervalMask; // Confidence interval mask: a user shall specify xx1 to print the .90 intervals, x1x for the .95 ones and 1xx for the .99 ones (default .95 only)

@@ -10,7 +10,7 @@
 #include "report_manager.h"
 #include <inttypes.h>
 #include <errno.h>
-#include "timeval_subtract.h"
+#include "timeval_utils.h"
 #include "common_thread.h"
 #include "timer_man.h"
 #include "common_udp.h"
@@ -41,7 +41,7 @@ static void *ackListenerInit (void *arg);
 static void *initSender (void *arg);
 
 static void *ackListenerInit (void *arg) {
-	struct arg_struct *args=(struct arg_struct *) arg;
+	arg_struct *args=(arg_struct *) arg;
 	controlRCVdata rcvData;
 	int return_value;
 
@@ -64,7 +64,7 @@ static void *ackListenerInit (void *arg) {
 }
 
 static void *initSender (void *arg) {
-	struct arg_struct *args=(struct arg_struct *) arg;
+	arg_struct *args=(arg_struct *) arg;
 	int return_value;
 	controlRCVdata initData;
 
@@ -73,7 +73,7 @@ static void *initSender (void *arg) {
 	initData.controlRCV.session_id=lamp_id_session;
 	memcpy(initData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
 
-	return_value=controlSenderUDP_RAW(args,&initData,lamp_id_session,INIT_RETRY_MAX_ATTEMPTS, INIT, INIT_RETRY_INTERVAL_MS, &ack_init_received, &ack_init_received_mut);
+	return_value=controlSenderUDP_RAW(args,&initData,lamp_id_session,INIT_RETRY_MAX_ATTEMPTS, INIT, 0, INIT_RETRY_INTERVAL_MS, &ack_init_received, &ack_init_received_mut);
 	if(return_value<0) {
 		if(return_value==-1) {
 			t_tx_error=ERR_INVALID_ARG_CMONUDP;
@@ -134,7 +134,7 @@ static void txLoop (arg_struct *args) {
 	// Populating headers
 	// [IMPROVEMENT] Future improvement: get destination MAC through ARP or broadcasted information and not specified by the user
 	etherheadPopulate(&(headers.etherHeader), args->srcMAC, args->opts->destmacaddr, ETHERTYPE_IP);
-	IP4headPopulateS(&(headers.ipHeader), args->devname, args->opts->destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, args->opts->destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
 	UDPheadPopulate(&(headers.udpHeader), CLIENT_SRCPORT, args->opts->port);
 	if(args->opts->mode_ub==PINGLIKE) {
 		ctrl=CTRL_PINGLIKE_REQ;
@@ -551,14 +551,14 @@ static void unidirRxTxLoop (arg_struct *args) {
 		ACKdata.controlRCV.port=CLIENT_SRCPORT;
 		memcpy(ACKdata.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
 
-		if(controlSenderUDP_RAW(args, &ACKdata, lamp_id_session, 1, ACK, 0, NULL, NULL)<0) {
+		if(controlSenderUDP_RAW(args,&ACKdata,lamp_id_session,1,ACK,0,0,NULL,NULL)<0) {
 			fprintf(stderr,"Failed sending ACK.\n");
 			t_rx_error=ERR_SEND;
 		}
 	}
 }
 
-unsigned int runUDPclient_raw(struct lampsock_data sData, char *devname, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts) {
+unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts) {
 	// Thread argument structure
 	arg_struct args;
 
@@ -586,7 +586,7 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, char *devname, macaddr
 
 	if(opts->latencyType==KRT) {
 		// Check if the KRT mode is supported by the current NIC and set the proper socket options
-		if (socketSetTimestamping(sData.descriptor)<0) {
+		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW)<0) {
 		 	perror("socketSetTimestamping() error");
 		    fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
 		    opts->latencyType=USERTOUSER;
@@ -599,7 +599,6 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, char *devname, macaddr
 	// Populate the 'args' struct
 	args.sData=sData;
 	args.opts=opts;
-	args.devname=devname;
 	args.srcMAC=srcMAC;
 	args.srcIP=srcIP;
 

@@ -9,6 +9,6 @@
 #define START_ID 11349
 #define INCR_ID 0
 	
-unsigned int runUDPclient_raw(struct lampsock_data sData, char *devname, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts);
+unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts);
 
 #endif

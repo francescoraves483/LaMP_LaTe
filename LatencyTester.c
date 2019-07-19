@@ -31,7 +31,6 @@ int main (int argc, char **argv) {
 	struct options opts;
 
 	// wlanLookup() variables, for interface name, source MAC address and return value
-	char devname[IFNAMSIZ]={0}; // It will contain the used interface name
 	macaddr_t srcmacaddr=NULL; // Initial value = NULL - if mode is not RAW, it will be left = NULL, and no source MAC will be obtained
 	int ret_wlanl_val;
 	int ifindex;
@@ -69,8 +68,11 @@ int main (int argc, char **argv) {
 		}
 	}
 
+	// Null the devname field in sData
+	memset(&sData.devname,0,IFNAMSIZ*sizeof(char));
+
 	// Look for available wireless/non-wireless interfaces
-	ret_wlanl_val=wlanLookup(devname,&ifindex,srcmacaddr,&srcIPaddr,wlanLookupIdx,opts.nonwlan_mode==0 ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
+	ret_wlanl_val=wlanLookup(sData.devname,&ifindex,srcmacaddr,&srcIPaddr,wlanLookupIdx,opts.nonwlan_mode==0 ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
 	if(ret_wlanl_val<=0) {
 		rs_printerror(stderr,ret_wlanl_val);
 		exit(EXIT_FAILURE);
@@ -91,7 +93,7 @@ int main (int argc, char **argv) {
 	}
 
 	// Print current interface name
-	fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",devname,ifindex);
+	fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",sData.devname,ifindex);
 
 	// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
 	if(opts.mode_cs==LOOPBACK_CLIENT || opts.mode_cs==LOOPBACK_SERVER) {
@@ -205,7 +207,7 @@ int main (int argc, char **argv) {
 		// Client is who sends packets
 		case CLIENT:
 		case LOOPBACK_CLIENT:
-			if(opts.mode_raw == RAW ? runUDPclient_raw(sData, devname, srcmacaddr, srcIPaddr, &opts) : runUDPclient(sData, &opts)) {
+			if(opts.mode_raw == RAW ? runUDPclient_raw(sData, srcmacaddr, srcIPaddr, &opts) : runUDPclient(sData, &opts)) {
 				close(sData.descriptor);
 				exit(EXIT_FAILURE);
 			}
@@ -224,7 +226,7 @@ int main (int argc, char **argv) {
 			}
 
 			do {
-				if(opts.mode_raw == RAW ? runUDPserver_raw(sData, devname, srcmacaddr, srcIPaddr, &opts) : runUDPserver(sData, &opts)) {
+				if(opts.mode_raw == RAW ? runUDPserver_raw(sData, srcmacaddr, srcIPaddr, &opts) : runUDPserver(sData, &opts)) {
 					close(sData.descriptor);
 					exit(EXIT_FAILURE);
 				}
