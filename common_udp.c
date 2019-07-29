@@ -340,7 +340,7 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 
 	ssize_t rcv_bytes;
 
-	if((type!=INIT && type!=ACK) || rcvData==NULL) {
+	if((type!=INIT && type!=ACK && type!=FOLLOWUP_CTRL) || rcvData==NULL) {
 		return -1;
 	}
 
@@ -386,7 +386,6 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 			continue;
 		}
 
-
 		// If the packet is really a LaMP packet, get the header data
 		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, NULL, &lamp_type_idx, NULL, NULL);
 
@@ -423,7 +422,7 @@ int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata
 	return 0;
 }
 
-/* Send FOLLOWUP_DATA message
+/* Send FOLLOWUP_DATA message with no payload
 Return values:
 0: message sent correctly
 1; error when sending the message
@@ -436,4 +435,34 @@ int sendFollowUpData(struct lampsock_data sData,uint16_t id,uint16_t seq,struct 
 	lampHeadSetTimestamp(&lampHeader,&tDiff);
 
 	return sendto(sData.descriptor,(byte_t *)&lampHeader,LAMP_HDR_SIZE(),NO_FLAGS,(struct sockaddr *)&(sData.addru.addrin[1]),sizeof(struct sockaddr_in))!=LAMP_HDR_SIZE();
+}
+
+/* Send FOLLOWUP_DATA message with no payload (raw socket)
+Return values:
+0: message sent correctly
+1; error when sending the message
+*/
+int sendFollowUpData_RAW(arg_struct *args,controlRCVdata *rcvData,uint16_t id,uint16_t ip_id,uint16_t seq,struct timeval tDiff) {
+	struct pktheaders_udp headers;
+	struct pktbuffers_udp_nopayload_fixed buffers;
+	size_t finalpktsize;
+	struct ipaddrs ipaddrs;
+	struct lamphdr *inpacket_lamphdr;
+
+	lampHeadPopulate(&(headers.lampHeader), CTRL_FOLLOWUP_DATA, id, seq);
+	lampHeadSetTimestamp(&(headers.lampHeader),&tDiff);
+
+	etherheadPopulate(&(headers.etherHeader), args->srcMAC, rcvData->controlRCV.mac, ETHERTYPE_IP);
+	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, rcvData->controlRCV.ip, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	IP4headAddID(&(headers.ipHeader),(unsigned short) ip_id);
+	UDPheadPopulate(&(headers.udpHeader), args->opts->mode_cs==CLIENT ? rcvData->controlRCV.port : args->opts->port, args->opts->mode_cs==CLIENT ? args->opts->port : rcvData->controlRCV.port);
+
+	UDPencapsulate(buffers.udppacket,&(headers.udpHeader),(byte_t *)&(headers.lampHeader),LAMP_HDR_SIZE(),ipaddrs);
+	IP4Encapsulate(buffers.ippacket, &(headers.ipHeader), buffers.udppacket, UDP_PACKET_SIZE_S(LAMP_HDR_SIZE()));
+	finalpktsize=etherEncapsulate(buffers.ethernetpacket, &(headers.etherHeader), buffers.ippacket, IP_UDP_PACKET_SIZE_S(LAMP_HDR_SIZE()));
+
+	// Get "in packet" LaMP header pointer, as required by rawLampSend
+	inpacket_lamphdr=(struct lamphdr *) (buffers.ethernetpacket+sizeof(struct ether_header)+sizeof(struct iphdr)+sizeof(struct udphdr));
+
+	return rawLampSend(args->sData.descriptor, args->sData.addru.addrll, inpacket_lamphdr, buffers.ethernetpacket, finalpktsize, FLG_NONE, UDP);
 }

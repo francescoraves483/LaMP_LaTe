@@ -27,5 +27,6 @@ int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t ses
 int controlReceiverUDP(int sFd, controlRCVdata *rcvData, lamptype_t type, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex);
 int controlReceiverUDP_RAW(int sFd, in_port_t port, in_addr_t ip, controlRCVdata *rcvData, lamptype_t type, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex);
 int sendFollowUpData(struct lampsock_data sData,uint16_t id,uint16_t seq,struct timeval tDiff);
+int sendFollowUpData_RAW(arg_struct *args,controlRCVdata *rcvData,uint16_t id,uint16_t ip_id,uint16_t seq,struct timeval tDiff);
 
 #endif

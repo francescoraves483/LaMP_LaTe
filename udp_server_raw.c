@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <inttypes.h>
+#include <linux/errqueue.h>
 #include "common_thread.h"
 #include "Rawsock_lib/ipcsum_alth.h"
 #include "timer_man.h"
@@ -32,6 +33,7 @@ static t_error_types t_tx_error;
 static reportStructure reportData;
 static uint16_t lamp_id_session;
 static modeub_t mode_session;
+static modefollowup_t followup_mode_session;
 static uint16_t client_port_session; // Stored in host byte order
 static uint8_t ack_report_received; // Global flag set by the ackListener thread: = 1 when an ACK has been received, otherwise it is = 0
 
@@ -320,11 +322,10 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	size_t UDPpayloadsize; // UDP payload size
 
 	struct pktheadersptr_udp headerptrs;
-	byte_t *payload=NULL;
 	byte_t *lampPacket=NULL;
 
 	// RX and TX timestamp containers
-	struct timeval rx_timestamp, tx_timestamp;
+	struct timeval rx_timestamp={.tv_sec=0,.tv_usec=0}, tx_timestamp={.tv_sec=0,.tv_usec=0};
 
 	// Variable to store the latency (trip time)
 	uint64_t tripTime;
@@ -334,6 +335,11 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	uint16_t lamp_id_rx;
 	uint16_t lamp_seq_rx=0; // Initilized to 0 in order to be sure to enter the while loop
 	uint16_t lamp_payloadlen_rx;
+	lamptype_t lamp_type_tx; // Hardware tx timestamping only
+
+	// LaMP fields for packet retrieved from socket error queue (hardware tx timestamping only)
+	uint16_t lamp_seq_rx_errqueue=0;
+	lamptype_t lamp_type_rx_errqueue;
 
 	// Container for the source MAC address (read from packet)
 	macaddr_t srcmacaddr_pkt=prepareMacAddrT();
@@ -346,13 +352,17 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	// while loop continue flag
 	int continueFlag=1;
 
-	// SO_TIMESTAMP variables and structs (cmsg)
+	// HARDWARE/SOFTWARE mode scm_timestamping structure
+	struct scm_timestamping hw_ts;
+
+	// SO_TIMESTAMP/SO_TIMESTAMPING variables and structs (cmsg)
 	struct msghdr mhdr;
 	struct iovec iov;
 	struct cmsghdr *cmsg = NULL;
 
 	// Ancillary data buffer
-	char ctrlBuf[CMSG_SPACE(sizeof(struct timeval))];
+	char ctrlBufKrt[CMSG_SPACE(sizeof(struct timeval))];
+	char ctrlBufHwSw[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
 	// struct in_addr containing the destination IP address (read as source IP address from the packets coming from the client)
 	// To be passed as argument to transmitReport()
@@ -362,8 +372,14 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	struct sockaddr_ll addrll;
 	socklen_t addrllLen=sizeof(addrll);
 
+	uint8_t isnotfirst_FU=0;
+	uint16_t followup_reply_type;
+
+	controlRCVdata fuData;
+
 	// Very important: initialize to 0 any flag that is used inside threads
 	ack_report_received=0;
+	followup_mode_session=FOLLOWUP_OFF;
 	t_rx_error=NO_ERR;
 	t_tx_error=NO_ERR;
 	if(pthread_mutex_init(&ack_report_received_mut,NULL)!=0) {
@@ -386,7 +402,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	// Report structure inizialization
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType);
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
 
 	// Populate the 'args' struct
 	args.sData=sData;
@@ -413,13 +429,15 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	} else if(mode_session==UNIDIR && opts->latencyType==KRT) {
 		// Set SO_TIMESTAMP
 		// Check if the KRT mode is supported by the current NIC and set the proper socket options
-		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW)<0) {
+		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW_RX)<0) {
 		 	perror("socketSetTimestamping() error");
 			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
 			opts->latencyType=USERTOUSER;
 		}
 
 		// Prepare ancillary data structures, if KRT mode is selected
+		memset(&mhdr,0,sizeof(mhdr));
+
 		// iovec buffers (scatter/gather arrays)
 		iov.iov_base=packet;
 		iov.iov_len=sizeof(packet);
@@ -429,8 +447,8 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		mhdr.msg_namelen=addrllLen;
 
 		// Ancillary data (control message)
-		mhdr.msg_control=ctrlBuf;
-	    mhdr.msg_controllen=sizeof(ctrlBuf);
+		mhdr.msg_control=ctrlBufKrt;
+	    mhdr.msg_controllen=sizeof(ctrlBufKrt);
 
 	       // iovec arrays
 		mhdr.msg_iov=&iov;
@@ -442,24 +460,21 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	// Already get all the packet pointers
 	lampPacket=UDPgetpacketpointers(packet,&(headerptrs.etherHeader),&(headerptrs.ipHeader),&(headerptrs.udpHeader));
-	payload=lampGetPacketPointers(lampPacket,&(headerptrs.lampHeader));
+	lampGetPacketPointers(lampPacket,&(headerptrs.lampHeader));
 
 	// From now on, 'payload' should -never- be used if (headerptrs.lampHeader)->payloadLen is 0
 
-	// Start receiving packets (this is the ping-like loop)
+	// Start receiving packets
 	while(continueFlag) {
-		// If in KRT unidirectional mode, use recvmsg(), otherwise, use recvfrom
-		if(mode_session==UNIDIR && opts->latencyType==KRT) {
+		// If in KRT unidirectional mode or in HARDWARE/SOFTWARE mode (requested by the client through a follow-up control message, use recvmsg(), otherwise, use recvfrom())
+		if((mode_session==UNIDIR && opts->latencyType==KRT) || followup_mode_session==FOLLOWUP_ON_HW || followup_mode_session==FOLLOWUP_ON_KRN || followup_mode_session==FOLLOWUP_ON_KRN_RX) {
 			saferecvmsg(rcv_bytes,sData.descriptor,&mhdr,NO_FLAGS);
-
-			// Extract ancillary data
-			for (cmsg=CMSG_FIRSTHDR(&mhdr);cmsg!=NULL;cmsg=CMSG_NXTHDR(&mhdr, cmsg)) {
-                if (cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==SO_TIMESTAMP) {
-                    rx_timestamp=*((struct timeval *)CMSG_DATA(cmsg));
-                }
-			}
 		} else {
 			saferecvfrom(rcv_bytes,sData.descriptor,packet,RAW_RX_PACKET_BUF_SIZE,NO_FLAGS,(struct sockaddr *)&addrll,&addrllLen);
+		}
+
+		if(followup_mode_session==FOLLOWUP_ON_APP) {
+			gettimeofday(&rx_timestamp,NULL);
 		}
 
 		// Timeout or other recvfrom() error occurred
@@ -505,8 +520,8 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		// If the packet is really a LaMP packet, get the header data
 		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, &lamp_seq_rx, &lamp_payloadlen_rx, &tx_timestamp, NULL);
 
-		// Discard any reply, ack or report, at the moment
-		if(lamp_type_rx==PINGLIKE_REPLY || lamp_type_rx==PINGLIKE_REPLY_TLESS || lamp_type_rx==PINGLIKE_ENDREPLY || lamp_type_rx==ACK || lamp_type_rx==REPORT || lamp_type_rx==INIT) {
+		// Discard any (end)reply, ack, init, report or follow-up data, at the moment
+		if(lamp_type_rx==PINGLIKE_REPLY || lamp_type_rx==PINGLIKE_REPLY_TLESS || lamp_type_rx==PINGLIKE_ENDREPLY || lamp_type_rx==ACK || lamp_type_rx==REPORT || lamp_type_rx==INIT || lamp_type_rx==FOLLOWUP_DATA) {
 			continue;
 		}
 
@@ -514,9 +529,124 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		if(lamp_id_rx!=lamp_id_session) {
 			continue;
 		}
+		
+		if((mode_session==UNIDIR && opts->latencyType==KRT) || followup_mode_session==FOLLOWUP_ON_HW || followup_mode_session==FOLLOWUP_ON_KRN || followup_mode_session==FOLLOWUP_ON_KRN_RX) {
+			for(cmsg=CMSG_FIRSTHDR(&mhdr);cmsg!=NULL;cmsg=CMSG_NXTHDR(&mhdr, cmsg)) {
+				// KRT (unidirectional) mode
+                if((opts->latencyType==KRT || followup_mode_session==FOLLOWUP_ON_KRN_RX) && cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==SO_TIMESTAMP) {
+                    rx_timestamp=*((struct timeval *)CMSG_DATA(cmsg));
+                }
+
+                // HARDWARE or SOFTWARE (kernel tx+rx) mode (bidirectional/ping-like only)
+               	if((followup_mode_session==FOLLOWUP_ON_HW || followup_mode_session==FOLLOWUP_ON_KRN) && cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==SO_TIMESTAMPING) {
+					hw_ts=*((struct scm_timestamping *)CMSG_DATA(cmsg));
+	    			rx_timestamp.tv_sec=hw_ts.ts[followup_mode_session==FOLLOWUP_ON_HW ? 2 : 0].tv_sec;
+	 				rx_timestamp.tv_usec=hw_ts.ts[followup_mode_session==FOLLOWUP_ON_HW ? 2 : 0].tv_nsec/MICROSEC_TO_NANOSEC;
+	           	}
+			}
+		}
+
+		// Check if this is a follow-up request packet (after the first one, all the subseuent ones will be ignored)
+		// Moreover, if a normal request packet is received, the session will go on without activating follow-ups
+		// and future follow-up requests will be ignored (in order not to provide inconsistent and/or mixed data to the client)
+		if(lamp_type_rx==FOLLOWUP_CTRL && IS_FOLLOWUP_REQUEST(lamp_payloadlen_rx) && isnotfirst_FU==0) {
+			// Received a follow-up request
+			if(opts->refuseFollowup) {
+				// Just deny the request
+				followup_reply_type=FOLLOWUP_DENY;
+			} else {
+				switch(lamp_payloadlen_rx) {
+					case FOLLOWUP_REQUEST_T_APP:
+						followup_reply_type=FOLLOWUP_ACCEPT; // There is now no reason to deny a request like this one
+						followup_mode_session=FOLLOWUP_ON_APP;
+						break;
+
+					case FOLLOWUP_REQUEST_T_KRN_RX:
+						if(socketSetTimestamping(sData,SET_TIMESTAMPING_SW_RX)<0) {
+							followup_reply_type=FOLLOWUP_DENY;
+						} else {
+							// Prepare ancillary data structure
+							followup_reply_type=FOLLOWUP_ACCEPT;
+							followup_mode_session=FOLLOWUP_ON_KRN_RX;
+
+							memset(&mhdr,0,sizeof(mhdr));
+
+							iov.iov_base=packet;
+							iov.iov_len=sizeof(packet);
+
+							mhdr.msg_name=NULL;
+							mhdr.msg_namelen=0;
+
+							mhdr.msg_control=ctrlBufKrt;
+							mhdr.msg_controllen=sizeof(ctrlBufKrt);
+
+							mhdr.msg_iov=&iov;
+							mhdr.msg_iovlen=1;
+
+							mhdr.msg_flags=NO_FLAGS;
+						}
+						break;
+
+					case FOLLOWUP_REQUEST_T_HW:
+					case FOLLOWUP_REQUEST_T_KRN:
+						if(socketSetTimestamping(sData,lamp_payloadlen_rx==FOLLOWUP_REQUEST_T_HW ? SET_TIMESTAMPING_HW : SET_TIMESTAMPING_SW_RXTX)<0) {
+							followup_reply_type=FOLLOWUP_DENY;
+						} else {
+							// Prepare ancillary data structure
+							followup_reply_type=FOLLOWUP_ACCEPT;
+							followup_mode_session=lamp_payloadlen_rx==FOLLOWUP_REQUEST_T_HW ? FOLLOWUP_ON_HW : FOLLOWUP_ON_KRN;
+
+							memset(&mhdr,0,sizeof(mhdr));
+
+							iov.iov_base=packet;
+							iov.iov_len=sizeof(packet);
+
+							mhdr.msg_name=NULL;
+							mhdr.msg_namelen=0;
+
+							mhdr.msg_control=ctrlBufHwSw;
+							mhdr.msg_controllen=sizeof(ctrlBufHwSw);
+
+							mhdr.msg_iov=&iov;
+							mhdr.msg_iovlen=1;
+
+							mhdr.msg_flags=NO_FLAGS;
+						}
+						break;
+
+					default:
+						followup_reply_type=FOLLOWUP_UNKNOWN;
+						break;
+				}
+			}
+
+			fuData.controlRCV.ip.s_addr=headerptrs.ipHeader->saddr;
+			fuData.controlRCV.port=client_port_session;
+			fuData.controlRCV.session_id=lamp_id_session;
+			memcpy(fuData.controlRCV.mac,srcmacaddr_pkt,ETHER_ADDR_LEN);
+
+			// Send follow-up reply
+			controlSenderUDP_RAW(&args,&fuData,lamp_id_session,1,FOLLOWUP_CTRL,followup_reply_type,0,NULL,NULL);
+
+			isnotfirst_FU=1;
+
+			continue;
+		}
+
+		if(isnotfirst_FU==0) {
+			isnotfirst_FU=1;
+		}
+
+		if(lamp_type_rx==FOLLOWUP_CTRL) {
+			// In a normal networking situation (i.e. with no packets out of order as the session is started) we should never reach this point
+			fprintf(stdout,"Ignoring a follow-up request from " PRI_MAC " (id=%u)..\n",
+					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx);
+
+			continue;
+		}
 
 		// If the packet is marked as last packet, set the continue flag to 0 for exiting the loop
-		if(lamp_type_rx==UNIDIR_STOP || lamp_type_rx==PINGLIKE_ENDREQ) {
+		if(lamp_type_rx==UNIDIR_STOP || lamp_type_rx==PINGLIKE_ENDREQ || lamp_type_rx==PINGLIKE_ENDREQ_TLESS) {
 			continueFlag=0;
 		}
 
@@ -527,14 +657,17 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				}
 
 				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-					fprintf(stderr,"Warning: negative latency!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n");
+					fprintf(stderr,"Error: negative latency for packet from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 					tripTime=0;
 				} else {
 					tripTime=rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec;
 				}
 
-				fprintf(stdout,"Received a unidirectional message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Time: %.3f ms (%s)\n",
-					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes,(double)tripTime/1000,latencyTypePrinter(opts->latencyType));
+				if(tripTime!=0) {
+					fprintf(stdout,"Received a unidirectional message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Time: %.3f ms (%s)\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes,(double)tripTime/1000,latencyTypePrinter(opts->latencyType));
+				}
 
 				// Update the current report structure
 				reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
@@ -562,18 +695,75 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				headerptrs.udpHeader->source=headerptrs.udpHeader->dest;
 				headerptrs.udpHeader->dest=htons(client_port_session);
 				
-				// Set REPLY as LaMP type (or ENDREPLY if this is the last packet)
-				headerptrs.lampHeader->ctrl = continueFlag==1 ? CTRL_PINGLIKE_REPLY : CTRL_PINGLIKE_ENDREPLY;
+				// Set REPLY/REPLY_TLESS as LaMP type (or ENDREPLY/ENDREPLY_TLESS if this is the last packet)
+				if(lamp_type_rx==PINGLIKE_REQ || lamp_type_rx==PINGLIKE_ENDREQ) {
+					headerptrs.lampHeader->ctrl = continueFlag==1 ? CTRL_PINGLIKE_REPLY : CTRL_PINGLIKE_ENDREPLY;
+				} else if(lamp_type_rx==PINGLIKE_REQ_TLESS || lamp_type_rx==PINGLIKE_ENDREQ_TLESS) {
+					headerptrs.lampHeader->ctrl = continueFlag==1 ? CTRL_PINGLIKE_REPLY_TLESS : CTRL_PINGLIKE_ENDREPLY_TLESS;
+				}
+
+				lamp_type_tx=CTRL_TO_TYPE(headerptrs.lampHeader->ctrl);
 
 				// Recompute IP checksum
 				headerptrs.ipHeader->check=0;
 				headerptrs.ipHeader->check=ip_fast_csum((__u8 *)headerptrs.ipHeader, headerptrs.ipHeader->ihl);
+
+				// If using application level or kernel level RX follow-up mode, gather the tx timestamp just before sending the packet
+				if(followup_mode_session==FOLLOWUP_ON_APP || followup_mode_session==FOLLOWUP_ON_KRN_RX) {
+					gettimeofday(&tx_timestamp,NULL);
+				}
 
 				// Send packet (as the reply does require to carry the client timestamp, the control field should now correspond to CTRL_PINGLIKE_REPLY)
 				// 'rcv_bytes' still stores the packet size, thus it can be used as packet size to be passed to rawLampSend(), wich will in turn call sendto() with that size
 				// rawLampSend should also take care of re-computing the checksum, which is changed due to the different fields in the reply packet.
 				if(rawLampSend(sData.descriptor, sData.addru.addrll, headerptrs.lampHeader, packet, rcv_bytes, FLG_NONE, UDP)) {
 					fprintf(stderr,"UDP server reported that it can't reply to the client with id=%u and seq=%u\n",lamp_id_rx,lamp_seq_rx);
+				}
+
+				// If in hardware timestamping or software (kernel) follow-up mode, gather the tx_timestamp from ancillary data
+				if(followup_mode_session==FOLLOWUP_ON_HW || followup_mode_session==FOLLOWUP_ON_KRN) {
+					// Loop until the right transmitted packet is received (as other packets are sent too, for which we are not
+					//  interested in obtaining any tx timestamp - e.g. all the follow-up data tx timestamps are useless in our case)
+					do {
+						if(pollErrqueueWait(sData.descriptor,POLL_ERRQUEUE_WAIT_TIMEOUT)<=0) {
+							rcv_bytes=-1;
+							break;
+						}
+						saferecvmsg(rcv_bytes,sData.descriptor,&mhdr,MSG_ERRQUEUE);
+						lampHeadGetData(lampPacket,&lamp_type_rx_errqueue,NULL,&lamp_seq_rx_errqueue,NULL,NULL,NULL);
+					} while(lamp_seq_rx_errqueue!=lamp_seq_rx || lamp_type_rx_errqueue!=lamp_type_tx);
+
+					if(rcv_bytes==-1) {
+						t_rx_error=ERR_TXSTAMP;
+						break;
+					}
+
+					for(cmsg=CMSG_FIRSTHDR(&mhdr);cmsg!=NULL;cmsg=CMSG_NXTHDR(&mhdr, cmsg)) {
+			           	if(cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==SO_TIMESTAMPING) {
+			            	hw_ts=*((struct scm_timestamping *)CMSG_DATA(cmsg));
+			             	tx_timestamp.tv_sec=hw_ts.ts[followup_mode_session==FOLLOWUP_ON_HW ? 2 : 0].tv_sec;
+			       			tx_timestamp.tv_usec=hw_ts.ts[followup_mode_session==FOLLOWUP_ON_HW ? 2 : 0].tv_nsec/MICROSEC_TO_NANOSEC;
+			           	}
+					}
+				}
+
+				// If follow-up mode is active, send the follow-up data packet
+				if(followup_mode_session!=FOLLOWUP_OFF) {
+					// Compute the difference between the rx and tx timestamps (difference stored in tx_timestamp, i.e. the "out" argument of timevalSub())
+					// This is done since normally tx_timestamp > rx_timestamp
+					if(timevalSub(&rx_timestamp,&tx_timestamp)) {
+						fprintf(stderr,"Error: negative time!\nCannot compute follow-up processing time for the current packet (id=%u, seq=%u).\n",lamp_id_rx,lamp_seq_rx);
+						tx_timestamp.tv_sec=0;
+						tx_timestamp.tv_usec=0;
+					} else {
+						fprintf(stdout,"Sending follow-up data. Processing delta: %.3f ms.\n",((double) tx_timestamp.tv_sec)*SEC_TO_MILLISEC+((double) tx_timestamp.tv_usec)/MICROSEC_TO_MILLISEC);
+					}
+					
+					// Send follow-up with the time difference timestamp (fuData should be already filled with all the proper data)
+					if(sendFollowUpData_RAW(&args,&fuData,lamp_id_rx,headerptrs.ipHeader->id,lamp_seq_rx,tx_timestamp)) {
+						perror("sendto() for sending LaMP follow-up data failed");
+						fprintf(stderr,"UDP server reported that it can't reply to the client with id=%u and seq=%u (follow-up)\n",lamp_id_rx,lamp_seq_rx);
+					}
 				}
 			break;
 

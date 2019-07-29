@@ -21,7 +21,6 @@ int timevalSL_insert(timevalStoreList SL, unsigned int seqNo, struct timeval sta
 int timevalSL_gather(timevalStoreList SL, unsigned int seqNo, struct timeval *stamp);
 void timevalSL_free(timevalStoreList SL);
 
-
 // Calling the timeval structres in and out, as in iputils-ping code
 // This inline function will perform out = out - in
 // Adaptation from timeval_subtract, in GNU C Library documentation
