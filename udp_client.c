@@ -10,7 +10,6 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <linux/errqueue.h>
-#include <semaphore.h>
 #include "timeval_utils.h"
 #include "common_thread.h"
 #include "timer_man.h"
