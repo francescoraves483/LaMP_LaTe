@@ -41,7 +41,7 @@ The executable is called `LaTe`.
 
 # LaMP specifications
 
-The full LaMP specifications can be found here: [LaMP specifications, revision 1.0](./LaMP/LaMP_specifications_rev1.0.pdf).
+The full LaMP specifications can be found here: [LaMP specifications, revision 2.0](./LaMP/LaMP_specifications_rev2.0.pdf).
 
 # LaTe user guide (v0.1.3-beta+)
 
@@ -64,7 +64,7 @@ Alternatively, it is possible to specify:
 When *-c* is selected, the destination address must be specified, depending on the protocol. **In UDP mode, this address corresponds to the destination IPv4 address.**
 
 When a client (either *-c* or *-l*) is selected, just after *-c/-l*, a mode has to be specified:
-- **-B** for the standard ping-like bidirectional mode, working like ICMP Echo Request/Reply, but in a client-server fashion (read also the [LaMP specifications](./LaMP/LaMP_specifications_rev1.0.pdf)).
+- **-B** for the standard ping-like bidirectional mode, working like ICMP Echo Request/Reply, but in a client-server fashion (read also the [LaMP specifications](./LaMP/LaMP_specifications_rev2.0.pdf)).
 - **-U** for a highly experimental unidirectional mode, in which the client sends a LaMP packet to the server, and the latter tries to compute the latency, based on its own timestamp and on the one embedded by the client inside the packet, without the need of generating a reply. It works only if there is an external way of keeping the devices’ clocks perfectly synchronized, with under-ms precision. As this is not an easy task, this mode shall remain experimental and it should never be preferred over the ping-like one.
 
 ## Protocols
@@ -189,7 +189,7 @@ At the end of the session, the average, minimum and maximum latency values will 
 
 Both client and server have a timeout set on the sockets they use to receive and send data. After few seconds of inactivity, they will declare the connection as terminated and terminate their execution (or, in case a daemon mode server is launched, a new session will start).
 
-Both the client and the server follow the [LaMP specifications](./LaMP/LaMP_specifications_rev1.0.pdf)
+Both the client and the server follow the [LaMP specifications](./LaMP/LaMP_specifications_rev2.0.pdf)
 
 
 ## How does the server daemon mode work?
@@ -208,7 +208,7 @@ After giving the termination command, the current session will run until it will
 
 # Version information
 
-The current version is **0.1.3-beta**, using **LaMP rev 1.0** and **Rawsock library v0.2.1**.
+The current version is **0.1.3-beta**, using **LaMP rev 1.0** (the development code, version _0.1.4-beta-development_, is using **LaMP rev 2.0** and will be released soon) and **Rawsock library v0.2.1**.
 
 Developed in **Politecnico di Torino**, licensed under **GPLv2**.
 
