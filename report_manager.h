@@ -56,7 +56,7 @@ void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
 int openTfile(const char *Tfilename, int followup_on_flag);
-int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t tripTime,uint64_t tripTimeProc);
+int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,uint64_t tripTime,uint64_t tripTimeProc);
 void closeTfile(int Tfilepointer);
 
 #endif

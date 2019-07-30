@@ -724,8 +724,8 @@ static void *rxLoop_t (void *arg) {
 				// Get source MAC address from packet
 				getSrcMAC(headerptrs.etherHeader,srcmacaddr_pkt);
 
-				fprintf(stdout,"Received a reply from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Time: %.3f ms (%s)%s\n",
-					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
+				fprintf(stdout,"Received a reply from " PRI_MAC " (id=%u, seq=%u). Time: %.3f ms (%s)%s\n",
+					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
 					args->opts->followup_mode!=FOLLOWUP_OFF ? " (follow-up)" : "");
 			}
 
@@ -746,7 +746,7 @@ static void *rxLoop_t (void *arg) {
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
 			if(Wfiledescriptor>0) {
-				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,tripTime,tripTimeProc);
+				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,tripTimeProc);
 			}
 
 			if(continueFlag==0) {

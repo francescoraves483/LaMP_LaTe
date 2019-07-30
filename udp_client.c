@@ -620,8 +620,8 @@ static void *rxLoop_t (void *arg) {
 		// When using the follow-up mode, data is printed only when both the reply and the follow-up have been received
 		if(args->opts->followup_mode==FOLLOWUP_OFF || (args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA)) {
 			if(tripTime!=0) {
-				fprintf(stdout,"Received a reply from %s (id=%u, seq=%u, rx_bytes=%d). Time: %.3f ms (%s)%s\n",
-					inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
+				fprintf(stdout,"Received a reply from %s (id=%u, seq=%u). Time: %.3f ms (%s)%s\n",
+					inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
 					args->opts->followup_mode!=FOLLOWUP_OFF ? " (follow-up)" : "");
 			}
 
@@ -641,7 +641,7 @@ static void *rxLoop_t (void *arg) {
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
 			if(Wfiledescriptor>0) {
-				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,tripTime,tripTimeProc);
+				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,tripTimeProc);
 			}
 
 			if(continueFlag==0) {

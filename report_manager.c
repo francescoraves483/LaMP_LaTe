@@ -383,21 +383,21 @@ int openTfile(const char *Tfilename,int followup_on_flag) {
 
 	// Write CSV file header, depending on the followup_on_flag flag value
 	if(followup_on_flag==0) {
-		dprintf(csvfd,"RTT/Latency,Error\n");
+		dprintf(csvfd,"Sequence Number,RTT/Latency,Error\n");
 	} else {
-		dprintf(csvfd,"RTT/Latency,Est server processing time,Error\n");
+		dprintf(csvfd,"Sequence Number,RTT/Latency,Est server processing time,Error\n");
 	}
 
 	return csvfd;
 }
 
-int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t tripTime,uint64_t tripTimeProc) {
+int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,uint64_t tripTime,uint64_t tripTimeProc) {
 	int dprintf_ret_val;
 
 	if(followup_on_flag==0) {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%.*f,%d\n",decimal_digits,(double)tripTime/1000,tripTime==0 ? 1 : 0);
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,tripTime==0 ? 1 : 0);
 	} else {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%.*f,%.*f,%d\n",decimal_digits,(double)tripTime/1000,decimal_digits,(double)tripTimeProc/1000,tripTime==0 ? 1 : 0);
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,decimal_digits,(double)tripTimeProc/1000,tripTime==0 ? 1 : 0);
 	}
 
 	return dprintf_ret_val;
