@@ -9,20 +9,20 @@
 #include <stdio.h>
 #include "options.h"
 
-// Taking into account 20 characters to represent each 64 bit number + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 6 '-' chacaters=20*4+25*2+1+6=137 + some margin = 150
-#define REPORT_BUFF_SIZE 150
+// Taking into account 20 characters to represent each 64 bit number + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 7 '-' chacaters=20*5+25*2+1+7=158 + some margin = 170
+#define REPORT_BUFF_SIZE 170
 
 #define CONFINT_NUMBER 3
 
 // Macro to write the report into a string
-#define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf", \
+#define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf", \
 									rep1.minLatency,rep1.averageLatency,rep1.maxLatency,rep1.packetCount, \
-									rep1.outOfOrderCount,(int) (rep1.latencyType),rep1.variance);
+									rep1.outOfOrderCount,rep1.errorsCount,(int) (rep1.latencyType),rep1.variance);
 
 // Macro to read from a report stored in a string
-#define repscanf(str1,rep1ptr)		sscanf(str1,"%" SCNu64 "-%lf-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%d-%lf", \
+#define repscanf(str1,rep1ptr)		sscanf(str1,"%" SCNu64 "-%lf-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%d-%lf", \
 									rep1ptr.minLatency,rep1ptr.averageLatency,rep1ptr.maxLatency,rep1ptr.packetCount, \
-									rep1ptr.outOfOrderCount,(int *) (rep1ptr.latencyType),rep1ptr.variance);
+									rep1ptr.outOfOrderCount,rep1ptr.errorsCount,(int *) (rep1ptr.latencyType),rep1ptr.variance);
 
 typedef struct reportStructure {
 	uint64_t minLatency;		// us
@@ -32,10 +32,12 @@ typedef struct reportStructure {
 	uint64_t packetCount;		// #
 	uint64_t outOfOrderCount;	// #
 	uint64_t totalPackets;		// #
+	uint64_t errorsCount;		// #
 
 	double variance;			// us
 
 	latencytypes_t latencyType; // enum (defined in options.h)
+	modefollowup_t followupMode; // enum (defined in options.h)
 
 	// Internal members
 	// Don't touch these variables, as they are managed internally by reportStructureUpdate()
@@ -48,10 +50,13 @@ typedef struct reportStructure {
 	double confidenceIntervalDev[3];  // us - not transmitted (confidence interval deviation from mean value)
 } reportStructure;
 
-void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType);
+void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode);
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber);
 void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
+int openTfile(const char *Tfilename, int followup_on_flag);
+int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,uint64_t tripTime,uint64_t tripTimeProc);
+void closeTfile(int Tfilepointer);
 
 #endif

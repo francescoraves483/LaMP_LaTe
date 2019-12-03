@@ -6,6 +6,6 @@
 #include "Rawsock_lib/rawsock_lamp.h"
 #include "common_socket_man.h"
 
-unsigned int runUDPserver_raw(struct lampsock_data sData, char *devname, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts);
+unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts);
 
 #endif

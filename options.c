@@ -14,7 +14,7 @@
 #define CSV_EXTENSION_LEN 4 // '.csv' length
 #define CSV_EXTENSION_STR ".csv"
 
-static const char *latencyTypes[]={"Unknown","User-to-user","KRT"};
+static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
 static void print_long_info(void) {
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
@@ -61,7 +61,9 @@ static void print_long_info(void) {
 		"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
 		"  -A <access category: BK | BE | VI | VO>: forces a certain EDCA MAC access category to\n"
 		"\t  be used (patched kernel required!).\n"
-		"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n"
+		"  -L <latency type: u | r | s | h>: select latency type: user-to-user, KRT (Kernel Receive Timestamp),\n"
+		"\t  software kernel transmit and receive timestamps (only when supported by the NIC) or hardware\n"
+		"\t  timestamps (only when supported by the NIC)\n"
 		"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
 		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
@@ -71,6 +73,12 @@ static void print_long_info(void) {
 		"  -C <confidence interval mask>: specifies an integer (mask) telling the program which confidence\n"
 		"\t  intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99\n"
 		"\t  7=.90/.95/.99 (default: %d).\n"
+		"  -F: enable the LaMP follow-up mechanism. At the moment only the ping-like mode is supporting this.\n"
+		"\t  This mechanism will send an additional follow-up message after each server reply, containing an\n"
+		"\t  estimate of the server processing time, which is computed depending on the chosen latency type.\n"
+		"  -W <filename, without extension>: write, for the current test only, the single packet latency\n"
+		"\t  measurement data to the specified CSV file. If the file already exists, data will be appended\n"
+		"\t  to the file, with a new header line. Warning! This option may negatively impact performance.\n"
 		"\n"
 
 		"[options] - Mandatory server options:\n"
@@ -95,6 +103,7 @@ static void print_long_info(void) {
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d).\n"
+		"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
 		"\n"
 
 		"Example of usage:\n"
@@ -179,7 +188,6 @@ void options_initialize(struct options *options) {
 	options->overwrite=0;
 
 	options->dmode=0;
-	options->terminator=0;
 
 	options->latencyType=USERTOUSER; // Default: user-to-user latency
 
@@ -187,6 +195,11 @@ void options_initialize(struct options *options) {
 	options->if_index=0;
 
 	options->confidenceIntervalMask=0x02; // Binary 010 as default value: i.e. print only .95 confidence intervals
+
+	options->followup_mode=FOLLOWUP_OFF;
+	options->refuseFollowup=0;
+
+	options->Wfilename=NULL;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -198,6 +211,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t L_flag=0; // =1 if a latency type was explicitely defined (with -L), otherwise = 0
 	uint8_t eI_flag=0; // =1 if either -e or -I (or both) was specified, otheriwse = 0
 	uint8_t C_flag=0; // =1 if -C was specified, otheriwise = 0
+	uint8_t F_flag=0; // =1 if -F was specified, otherwise = 0
 	/* 
 	   The p_flag has been inserted only for future use: it is set as a port is explicitely defined. This allows to check if a port was specified
 	   for a protocol without the concept of 'port', as more protocols will be implemented in the future. In that case, it will be possible to
@@ -410,6 +424,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				C_flag=1;
 				break;
 
+			case 'F':
+				F_flag=1;
+				break;
+
 			case 'M':
 				if(sscanf(optarg,SCN_MAC,MAC_SCANNER(values))!=6) {
 					fprintf(stderr,"Error when reading the destination MAC address after -M.\n");
@@ -446,8 +464,8 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					print_short_info_err(options);
 				}
 
-				if(optarg[0]!='r' && optarg[0]!='u') {
-					fprintf(stderr,"Error: valid -L options: 'u', 'r'.\n");
+				if(optarg[0]!='r' && optarg[0]!='u' && optarg[0]!='s' && optarg[0]!='h') {
+					fprintf(stderr,"Error: valid -L options: 'u', 'r', 'h' (not supported on every NIC).\n");
 					print_short_info_err(options);
 				}
 
@@ -458,6 +476,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 					case 'r':
 						options->latencyType=KRT;
+						break;
+
+					case 's':
+						options->latencyType=SOFTWARE;
+						break;
+
+					case 'h':
+						options->latencyType=HARDWARE;
 						break;
 
 					default:
@@ -480,6 +506,26 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					print_short_info_err(options);
 				}
 				eI_flag=1;
+				break;
+
+			case 'W':
+				filenameLen=strlen(optarg)+1;
+				if(filenameLen>1) {
+					options->Wfilename=malloc((filenameLen+CSV_EXTENSION_LEN)*sizeof(char));
+					if(!options->Wfilename) {
+						fprintf(stderr,"Error in parsing the filename for the -T mode: cannot allocate memory.\n");
+						print_short_info_err(options);
+					}
+					strncpy(options->Wfilename,optarg,filenameLen);
+					strncat(options->Wfilename,CSV_EXTENSION_STR,CSV_EXTENSION_LEN);
+				} else {
+					fprintf(stderr,"Error in parsing the filename for the -T mode: null string length.\n");
+					print_short_info_err(options);
+				}
+				break;
+
+			case '0':
+				options->refuseFollowup=1;
 				break;
 
 			default:
@@ -564,7 +610,24 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		print_short_info_err(options);
 	}
 
+	// -L h cannot be specified in unidirectional mode (i.e. a server can never specify 'h' as latency type)
+	if((options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER) && options->latencyType==HARDWARE) {
+		fprintf(stderr,"Error: hardware timestamps are only supported by clients and in ping-like mode (-B).\n");
+		print_short_info_err(options);
+	}
+
+	// -L s cannot be specified in unidirectional mode (i.e. a server can never specify 's' as latency type)
+	if((options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER) && options->latencyType==SOFTWARE) {
+		fprintf(stderr,"Error: kernel receive/transmit timestamps are only supported by clients and in ping-like mode (-B).\n");
+		print_short_info_err(options);
+	}
+
 	// Check consistency between parameters
+	if((options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) && options->refuseFollowup==1) {
+		fprintf(stderr,"Error: -0 (refuse follow-up requests) is a server only option.");
+		print_short_info_err(options);
+	}
+
 	if(options->protocol==UNSET_P) {
 		fprintf(stderr,"Error: a protocol must be specified. Supported protocols: %s\n",SUPPORTED_PROTOCOLS);
 		print_short_info_err(options);
@@ -585,9 +648,45 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		print_short_info_err(options);
 	}
 
+	if((options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER) && F_flag==1) {
+		fprintf(stderr,"Error: '-F' is client-only.\n");
+		print_short_info_err(options);
+	}
+
+	if(options->mode_ub==UNIDIR && F_flag==1) {
+		fprintf(stderr,"Error: '-F' is supported in ping-like mode only, at the moment.\n");
+		print_short_info_err(options);
+	}
+
 	// Print a warning in case a MAC address was specified with -M in UDP non raw mode, as the MAC is obtained through ARP and this argument will be ignored
 	if(options->protocol==UDP && options->mode_raw==NON_RAW && M_flag==1) {
 		fprintf(stderr,"Warning: a destination MAC address has been specified, but it will be ignored and obtained through ARP.\n");
+	}
+
+	// Get the correct follow-up mode, depending on the current latency type, if F_flag=1 (i.e. if -F was specified)
+	if(F_flag==1) {
+		switch(options->latencyType) {
+			case USERTOUSER:
+				options->followup_mode=FOLLOWUP_ON_APP;
+			break;
+
+			case KRT:
+				options->followup_mode=FOLLOWUP_ON_KRN_RX;
+			break;
+
+			case SOFTWARE:
+				options->followup_mode=FOLLOWUP_ON_KRN;
+			break;
+
+			case HARDWARE:
+				options->followup_mode=FOLLOWUP_ON_HW;
+			break;
+
+			default:
+				fprintf(stderr,"Warning: unknown error. No follow-up mechanism will be activated.\n");
+				options->followup_mode=FOLLOWUP_OFF;
+			break;
+		}
 	}
 
 	return 0;
@@ -596,6 +695,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 void options_free(struct options *options) {
 	if(options->filename) {
 		free(options->filename);
+	}
+
+	if(options->Wfilename) {
+		free(options->Wfilename);
 	}
 }
 

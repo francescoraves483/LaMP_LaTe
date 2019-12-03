@@ -98,16 +98,18 @@ static inline struct tm *getLocalTime(void) {
 	return localtime(&currtime);
 }
 
-void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType) {
+void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode) {
 	report->averageLatency=0.0;
 	report->minLatency=UINT64_MAX;
 	report->maxLatency=0;
 
 	report->latencyType=latencyType;
+	report->followupMode=followupMode;
 
 	report->outOfOrderCount=0;
 	report->packetCount=0;
 	report->totalPackets=totalPackets;
+	report->errorsCount=0;
 
 	report->variance=0;
 
@@ -125,40 +127,46 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 }
 
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber) {
-	// Set _lastSeqNumber on first update
-	if(report->_isFirstUpdate==1) {
-		report->_lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
-		report->_isFirstUpdate=0;
-	}
-
 	report->packetCount++;
 
-	report->_welfordAverageLatencyOld=report->averageLatency;
-	report->averageLatency+=(tripTime-report->averageLatency)/report->packetCount;
+	if(tripTime!=0) {
+		// Set _lastSeqNumber on first update
+		if(report->_isFirstUpdate==1) {
+			report->_lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
+			report->_isFirstUpdate=0;
+		}
 
-	if(tripTime<report->minLatency) {
-		report->minLatency=tripTime;
-	}
+		report->_welfordAverageLatencyOld=report->averageLatency;
+		report->averageLatency+=(tripTime-report->averageLatency)/report->packetCount;
 
-	if(tripTime>report->maxLatency) {
-		report->maxLatency=tripTime;
-	}
+		if(tripTime<report->minLatency) {
+			report->minLatency=tripTime;
+		}
 
-	// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets.
-	// The out of order count is related here to the number of times a decreasing sequence number is detected.
-	// When the last sequence number is 65535 (UINT16_MAX), due to cyclic numbers, the expected current one is 0
-	// This should not be detected as an error, as it is the only situation in which a decreasing sequence number is expected
-	if(report->_lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->_lastSeqNumber) {
-		report->outOfOrderCount++;
-	}
+		if(tripTime>report->maxLatency) {
+			report->maxLatency=tripTime;
+		}
 
-	// Set last sequence number
-	report->_lastSeqNumber=seqNumber;
+		// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets.
+		// The out of order count is related here to the number of times a decreasing sequence number is detected.
+		// When the last sequence number is 65535 (UINT16_MAX), due to cyclic numbers, the expected current one is 0
+		// This should not be detected as an error, as it is the only situation in which a decreasing sequence number is expected
+		if(report->_lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->_lastSeqNumber) {
+			report->outOfOrderCount++;
+		}
 
-	// Compute the current variance (std dev squared) value using Welford's online algorithm
-	report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
-	if(report->packetCount>1) {
-		report->variance=report->_welfordM2/(report->packetCount-1);
+		// Set last sequence number
+		report->_lastSeqNumber=seqNumber;
+
+		// Compute the current variance (std dev squared) value using Welford's online algorithm
+		report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
+		if(report->packetCount>1) {
+			report->variance=report->_welfordM2/(report->packetCount-1);
+		}
+	} else {
+		// If tripTime is zero, a timestamping error occurred: count the current packet as a packet containing an error
+		// This packet will be counter as received, but it will not be used to compute the final statistics
+		report->errorsCount++;
 	}
 }
 
@@ -179,26 +187,31 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 	const char *confidenceIntervalLabels[]={".90",".95",".99"};
 
 	if(report->minLatency==UINT64_MAX) {
-		// No packets have been received
-		fprintf(stream,"No packets received: \n"
+		// No packets have been received (or they all caused timestamping errors)
+		fprintf(stream,"Latency over 0 packets: \n"
 			"(-) Minimum: - ms - Maximum: - ms - Average: - ms\n"
 			"Standard Dev.: - ms\n"
 			"Lost packets: 100%% [%" PRIu64 "/%" PRIu64 "]\n"
+			"Errors count: %" PRIu64 "\n"
 			"Out of order count (approx. as the number of times a decreasing seq. number is detected): -\n\n"
+			"No packets with useful data for computing statistics were received.\n"
 			"Please make sure that the server has been correctly launched!\n",
 			report->totalPackets, 
-			report->totalPackets);
+			report->totalPackets,
+			report->errorsCount);
 	} else {
 		if(report->packetCount>report->totalPackets) {
 			fprintf(stream,"There's something wrong: the client received more packets than the total number set with -n.\n");
 			fprintf(stream,"A negative percentage packet loss may occur.\n");
 		}
 
+		// Latency/RTT is computed over all the correctly received packets, excluding all the packets which caused timestamping errors (counted by report->errorsCount)
 		fprintf(stream,"Latency over %" PRIu64 " packets:\n"
-			"(%s) Minimum: %.3f ms - Maximum: %.3f ms - Average: %.3f ms\n"
+			"(%s)%s Minimum: %.3f ms - Maximum: %.3f ms - Average: %.3f ms\n"
 			"Standard Dev.: %.4f ms\n",
-			report->totalPackets,
+			report->totalPackets-report->errorsCount,
 			latencyTypePrinter(report->latencyType),
+			report->followupMode!=FOLLOWUP_OFF ? " (follow-up)" : "",
 			report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000, 
 			((double) report->maxLatency)/1000,
 			report->averageLatency/1000,
@@ -227,6 +240,9 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 				report->totalPackets-report->packetCount,
 				report->totalPackets);
 		}
+
+		// Print the number of packets which caused timestamping errors
+		fprintf(stream,"Error count: %" PRIu64 "\n",report->errorsCount);
 
 		fprintf(stream, "Out of order count (approx. as the number of times a decreasing seq. number is detected): %" PRIu64 "\n",
 			report->outOfOrderCount);
@@ -268,7 +284,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 		if(opts->overwrite || !fileAlreadyExists) {
 			// Recreate CSV first line
-			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-s,LatencyType,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
+			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-s,LatencyType,FollowUp,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,ErrorsCount,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
 		}
 
 		// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
@@ -302,10 +318,12 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%" PRIu64 ","			// total number of packets requested
 			"%.3f,"					// interval between packets (in s)
 			"%s,"					// latency type (-L)
+			"%s,"					// follow-up (-F)
 			"%.3f,"					// minLatency
 			"%.3f,"					// maxLatency
 			"%.3f,"					// avgLatency
 			"%.2f,"					// lost packets (perc)
+			"%" PRIu64 ","			// errors count
 			"%" PRIu64 ","			// out-of-order count
 			"%.4f,",				// standard deviation
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
@@ -313,10 +331,12 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			opts->number,																											// total number of packets requested
 			((double) opts->interval)/1000,																							// interval between packets (in s)
 			latencyTypePrinter(report->latencyType),																				// latency type (-L)
+			report->followupMode!=FOLLOWUP_OFF ? "On" : "Off",																		// follow-up (-F)					
 			report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,												// minLatency
 			((double) report->maxLatency)/1000,																						// maxLatency
 			report->minLatency==UINT64_MAX ? 0 : report->averageLatency/1000,														// avgLatency
 			lostPktPerc,																											// lost packets (perc)
+			report->errorsCount,																									// errors count
 			report->outOfOrderCount,																								// Out-of-order count
 			sqrt(report->variance)/1000);																							// standard deviation (sqrt of variance)
 
@@ -343,4 +363,48 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	}
 
 	return printOpErrStatus;
+}
+
+int openTfile(const char *Tfilename,int followup_on_flag) {
+	int csvfd;
+	errno=0;
+
+	if(Tfilename==NULL) {
+		return -2;
+	}
+
+	csvfd=open(Tfilename, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+
+	if(csvfd<0) {
+		if(errno==EEXIST) {
+			csvfd=open(Tfilename, O_WRONLY | O_APPEND);
+		}
+	}
+
+	// Write CSV file header, depending on the followup_on_flag flag value
+	if(followup_on_flag==0) {
+		dprintf(csvfd,"Sequence Number,RTT/Latency,Error\n");
+	} else {
+		dprintf(csvfd,"Sequence Number,RTT/Latency,Est server processing time,Error\n");
+	}
+
+	return csvfd;
+}
+
+int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,uint64_t tripTime,uint64_t tripTimeProc) {
+	int dprintf_ret_val;
+
+	if(followup_on_flag==0) {
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,tripTime==0 ? 1 : 0);
+	} else {
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,decimal_digits,(double)tripTimeProc/1000,tripTime==0 ? 1 : 0);
+	}
+
+	return dprintf_ret_val;
+}
+
+void closeTfile(int Tfiledescriptor) {
+	if(Tfiledescriptor>0) {
+		close(Tfiledescriptor);
+	}
 }

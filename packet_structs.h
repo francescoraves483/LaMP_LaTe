@@ -28,4 +28,11 @@ struct pktbuffers_udp {
 	byte_t *lamppacket;
 };
 
+struct pktbuffers_udp_nopayload_fixed {
+	byte_t ethernetpacket[ETH_IP_UDP_PACKET_SIZE_S(LAMP_HDR_SIZE())];
+	byte_t ippacket[IP_UDP_PACKET_SIZE_S(LAMP_HDR_SIZE())];
+	byte_t udppacket[UDP_PACKET_SIZE_S(LAMP_HDR_SIZE())];
+	byte_t lamppacket[LAMP_HDR_SIZE()];
+};
+
 #endif
