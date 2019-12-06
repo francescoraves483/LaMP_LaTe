@@ -1,6 +1,5 @@
 EXECNAME=LaTe
 
-CC=gcc
 CC_EMBEDDED=x86_64-openwrt-linux-musl-gcc
 
 SRC_DIR=src
@@ -24,7 +23,18 @@ LDLIBS += -lpthread -lm
 
 .PHONY: all clean
 
-all: $(EXECNAME)
+all: compilePC
+
+compilePC: CC = gcc
+compileAPU: CC = $(CC_EMBEDDED)
+
+compilePCdebug: CFLAGS += -g
+compilePCdebug: compilePC
+
+compileAPUdebug: CFLAGS += -g
+compileAPUdebug: compileAPU
+
+compilePC compileAPU compilePCdebug compileAPUdebug: $(EXECNAME)
 
 $(EXECNAME): $(OBJ_CC)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
