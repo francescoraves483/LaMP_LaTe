@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <netinet/in.h>
-#include "Rawsock_lib/rawsock_lamp.h" // In order to import the definition of protocol_t
+#include "rawsock_lamp.h" // In order to import the definition of protocol_t
 
 #define VALID_OPTS "hut:n:c:df:svlmop:reA:BC:FM:P:UL:I:W:0"
 #define SUPPORTED_PROTOCOLS "[-u]"

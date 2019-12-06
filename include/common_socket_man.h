@@ -1,6 +1,6 @@
 #ifndef NONRAW_SOCKETMAN_H_INCLUDED
 #define NONRAW_SOCKETMAN_H_INCLUDED
-#include "Rawsock_lib/rawsock.h"
+#include "rawsock.h"
 #include <linux/if_packet.h>
 #include <net/if.h>
 

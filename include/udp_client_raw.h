@@ -2,8 +2,8 @@
 #define LATENCYTEST_UDPCLIENTRAW_H_INCLUDED
 
 #include "options.h"
-#include "Rawsock_lib/rawsock.h"
-#include "Rawsock_lib/rawsock_lamp.h"
+#include "rawsock.h"
+#include "rawsock_lamp.h"
 #include "common_socket_man.h"
 
 #define START_ID 11349

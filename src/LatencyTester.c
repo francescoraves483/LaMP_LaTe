@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
-#include "Rawsock_lib/rawsock.h"
-#include "Rawsock_lib/rawsock_lamp.h"
+#include "rawsock.h"
+#include "rawsock_lamp.h"
 #include "udp_client_raw.h"
 #include "udp_server_raw.h"
 #include "udp_client.h"

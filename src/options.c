@@ -9,7 +9,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <inttypes.h>
-#include "Rawsock_lib/rawsock.h"
+#include "rawsock.h"
 
 #define CSV_EXTENSION_LEN 4 // '.csv' length
 #define CSV_EXTENSION_STR ".csv"

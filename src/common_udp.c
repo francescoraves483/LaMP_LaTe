@@ -1,5 +1,5 @@
 #include "common_udp.h"
-#include "Rawsock_lib/rawsock_lamp.h"
+#include "rawsock_lamp.h"
 #include "packet_structs.h"
 #include "common_socket_man.h"
 #include "errno.h"

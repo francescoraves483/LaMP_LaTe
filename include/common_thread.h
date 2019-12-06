@@ -3,8 +3,8 @@
 
 /* ----------------- Common thread definitions ----------------- */
 
-#include "Rawsock_lib/rawsock.h"
-#include "Rawsock_lib/rawsock_lamp.h"
+#include "rawsock.h"
+#include "rawsock_lamp.h"
 #include "common_socket_man.h"
 
 #define DBG_PRINT_FLUSH(text) fprintf(stdout,"%s\n",text); \

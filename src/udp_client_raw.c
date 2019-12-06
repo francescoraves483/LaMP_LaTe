@@ -1,11 +1,12 @@
-#include "udp_client.h"
+#include "udp_client_raw.h"
+#include "packet_structs.h"
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
-#include "Rawsock_lib/rawsock_lamp.h"
+#include "rawsock_lamp.h"
 #include "report_manager.h"
 #include <inttypes.h>
 #include <errno.h>
@@ -40,34 +41,35 @@ timevalStoreList triptimelist;
 // Mutex to protect tslist, as defined before
 static pthread_mutex_t tslist_mut=PTHREAD_MUTEX_INITIALIZER;
 
-static uint8_t ack_init_received=0; // Global flag set by the ackListenerInit thread: = 1 when an ACK has been received, otherwise it is = 0
-static pthread_mutex_t ack_init_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the ack_init_received variable (as it written by a thread and read by another one)
+static uint8_t ack_init_received=0; // Global flag set by the ackListener thread: = 1 when an ACK has been received, otherwise it is = 0
+static pthread_mutex_t ack_init_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the ack_received variable (as it written by a thread and read by another one)
 static uint8_t followup_reply_received=0; // Global flag set by the followupReplyListener thread: = 1 when a reply has been received, otherwise it is = 0
 static pthread_mutex_t followup_reply_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the followup_reply_received variable
-
 
 extern inline int timevalSub(struct timeval *in, struct timeval *out);
 
 // Function prototypes
-static void txLoop (arg_struct_udp *args);
-static void unidirRxTxLoop (arg_struct_udp *args);
+static void txLoop(arg_struct *args);
+static void unidirRxTxLoop(arg_struct *args);
+static void rawBuffersCleanup(struct pktbuffers_udp buffs);
 
 // Thread entry point function prototypes
 static void *txLoop_t (void *arg);
 static void *rxLoop_t (void *arg);
 static void *ackListenerInit (void *arg);
-static void *followupReplyListener (void *arg);
 static void *initSender (void *arg);
+
+static void *followupReplyListener (void *arg);
 static void *followupRequestSender (void *arg);
 
 static void *ackListenerInit (void *arg) {
-	int *sFd=(int *) arg;
+	arg_struct *args=(arg_struct *) arg;
 	controlRCVdata rcvData;
 	int return_value;
 
 	rcvData.session_id=lamp_id_session;
 
-	return_value=controlReceiverUDP(*sFd,&rcvData,ACK,&ack_init_received,&ack_init_received_mut);
+	return_value=controlReceiverUDP_RAW(args->sData.descriptor,CLIENT_SRCPORT,args->srcIP.s_addr,&rcvData,ACK,&ack_init_received,&ack_init_received_mut);
 	if(return_value<0) {
 		if(return_value==-1) {
 			t_rx_error=ERR_INVALID_ARG_CMONUDP;
@@ -83,14 +85,41 @@ static void *ackListenerInit (void *arg) {
 	pthread_exit(NULL);
 }
 
+static void *initSender (void *arg) {
+	arg_struct *args=(arg_struct *) arg;
+	int return_value;
+	controlRCVdata initData;
+
+	initData.controlRCV.ip=args->opts->destIPaddr;
+	initData.controlRCV.port=CLIENT_SRCPORT;
+	initData.controlRCV.session_id=lamp_id_session;
+	memcpy(initData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
+
+	return_value=controlSenderUDP_RAW(args,&initData,lamp_id_session,INIT_RETRY_MAX_ATTEMPTS, INIT, 0, INIT_RETRY_INTERVAL_MS, &ack_init_received, &ack_init_received_mut);
+	if(return_value<0) {
+		if(return_value==-1) {
+			t_tx_error=ERR_INVALID_ARG_CMONUDP;
+		} else if(return_value==-2) {
+			t_tx_error=ERR_SEND_INIT;
+		} else if(return_value==-3) {
+			t_rx_error=ERR_MALLOC;
+		} else {
+			t_rx_error=ERR_UNKNOWN;
+		}
+	}
+
+	pthread_exit(NULL);
+}
+
 static void *followupReplyListener (void *arg) {
-	arg_struct_followup_listener *ful_arg=(arg_struct_followup_listener *) arg;
+	arg_struct_followup_listener_raw_ip *ful_arg=(arg_struct_followup_listener_raw_ip *) arg;
 	controlRCVdata rcvData;
 	int return_value;
 
 	rcvData.session_id=lamp_id_session;
 
-	return_value=controlReceiverUDP(ful_arg->sFd,&rcvData,FOLLOWUP_CTRL,&followup_reply_received,&followup_reply_received_mut);
+	return_value=controlReceiverUDP_RAW(ful_arg->sFd,CLIENT_SRCPORT,ful_arg->srcIP.s_addr,&rcvData,FOLLOWUP_CTRL,&followup_reply_received,&followup_reply_received_mut);
+
 	if(return_value<0) {
 		if(return_value==-1) {
 			t_rx_error=ERR_INVALID_ARG_CMONUDP;
@@ -109,29 +138,11 @@ static void *followupReplyListener (void *arg) {
 	pthread_exit(NULL);
 }
 
-static void *initSender (void *arg) {
-	arg_struct_udp *args=(arg_struct_udp *) arg;
-	int return_value;
-
-	return_value=controlSenderUDP(args,lamp_id_session,INIT_RETRY_MAX_ATTEMPTS,INIT,0,INIT_RETRY_INTERVAL_MS,&ack_init_received,&ack_init_received_mut);
-
-	if(return_value<0) {
-		if(return_value==-1) {
-			t_tx_error=ERR_INVALID_ARG_CMONUDP;
-		} else if(return_value==-2) {
-			t_tx_error=ERR_SEND_INIT;
-		} else {
-			t_rx_error=ERR_UNKNOWN;
-		}
-	}
-
-	pthread_exit(NULL);
-}
-
 static void *followupRequestSender (void *arg) {
-	arg_struct_udp *args=(arg_struct_udp *) arg;
+	arg_struct *args=(arg_struct *) arg;
 	int return_value;
 	uint16_t followup_req_type;
+	controlRCVdata fuData;
 
 	// Set follow-up request type
 	switch(args->opts->followup_mode) {
@@ -157,7 +168,12 @@ static void *followupRequestSender (void *arg) {
 	}
 
 	if(t_tx_error!=ERR_SEND_FOLLOWUP) {
-		return_value=controlSenderUDP(args,lamp_id_session,FOLLOWUP_CTRL_RETRY_MAX_ATTEMPTS,FOLLOWUP_CTRL,followup_req_type,FOLLOWUP_CTRL_RETRY_INTERVAL_MS,&followup_reply_received,&followup_reply_received_mut);
+		fuData.controlRCV.ip=args->opts->destIPaddr;
+		fuData.controlRCV.port=CLIENT_SRCPORT;
+		fuData.controlRCV.session_id=lamp_id_session;
+		memcpy(fuData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
+
+		return_value=controlSenderUDP_RAW(args,&fuData,lamp_id_session,FOLLOWUP_CTRL_RETRY_MAX_ATTEMPTS,FOLLOWUP_CTRL,followup_req_type,FOLLOWUP_CTRL_RETRY_INTERVAL_MS,&followup_reply_received,&followup_reply_received_mut);
 
 		if(return_value<0) {
 			if(return_value==-1) {
@@ -173,8 +189,9 @@ static void *followupRequestSender (void *arg) {
 	pthread_exit(NULL);
 }
 
+
 static void *txLoop_t (void *arg) {
-	arg_struct_udp *args=(arg_struct_udp *) arg;
+	arg_struct *args=(arg_struct *) arg;
 
 	// Call the Tx loop
 	txLoop(args);
@@ -182,13 +199,18 @@ static void *txLoop_t (void *arg) {
 	pthread_exit(NULL);
 }
 
-static void txLoop (arg_struct_udp *args) {
-	// LaMP header and LaMP packet buffer
-	struct lamphdr lampHeader;
-	byte_t *lampPacket=NULL;
-	byte_t *lampPacketRxPtr=NULL;
+static void txLoop (arg_struct *args) {
+	// Packet buffers and headers
+	struct pktheaders_udp headers;
+	struct pktbuffers_udp buffers = {NULL, NULL, NULL, NULL};
+	// IP address (src+dest) structure
+	struct ipaddrs ipaddrs;
+	// id to be inserted in the id field on the IP header
+	unsigned int id=START_ID;
+	// "in packet" LaMP header pointer
+	struct lamphdr *inpacket_lamphdr;
 
-	// Timer variables
+	// Timer management variables
 	struct pollfd timerMon;
 	int clockFd;
 	int timerCaS_res=0;
@@ -202,8 +224,12 @@ static void txLoop (arg_struct_udp *args) {
 	// while loop counter
 	unsigned int counter=0;
 
-	// LaMP packet type
+	// Final packet size
+	size_t finalpktsize;
+
+	// LaMP packet type and end_flag
 	uint8_t ctrl=CTRL_PINGLIKE_REQ;
+	endflag_t end_flag;
 	uint32_t lampPacketSize=0;
 
 	// SO_TIMESTAMPING variables and structs (cmsg)
@@ -214,29 +240,30 @@ static void txLoop (arg_struct_udp *args) {
 	// Ancillary data buffer
 	char ctrlBuf[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
-	// struct scm_timestamping and struct timeval for the tx timestamp
-	struct scm_timestamping hw_ts;
-	struct timeval tx_timestamp;
+	// iov_base buffer pointer
+	byte_t *data_iov=NULL;
 
-	// recvfrom variable (for HARDWARE mode only)
-	ssize_t rcv_bytes;
+	// LaMP packet pointer (from data_iov, to be used in HARDWARE/SOFTWARE mode only)
+	byte_t *lampPacketRxPtr=NULL;
 
 	// LaMP fields for packet retrieved from socket error queue (hardware tx timestamping only)
 	uint16_t lamp_seq_rx_errqueue=0;
 	lamptype_t lamp_type_rx_errqueue;
 
-	// Buffer used in HARDWARE mode only, set as iov_base.
-	// As "the recvmsg call returns the original
-	//  outgoing data packet with two ancillary messages attached"
-	//  the size of this buffer is set to be equal to the size of
-	//  the lampPacket buffer, allocated later on, plus all the 
-	//  UDP/IPv4/Ethernet headers
-	byte_t *data_iov=NULL;
+	// recvfrom variable (for HARDWARE/SOFTWARE mode only)
+	ssize_t rcv_bytes;
 
-	// Populating the LaMP header
+	// struct scm_timestamping and struct timeval for the tx timestamp
+	struct scm_timestamping hw_ts;
+	struct timeval tx_timestamp;
+
+	// Populating headers
+	// [IMPROVEMENT] Future improvement: get destination MAC through ARP or broadcasted information and not specified by the user
+	etherheadPopulate(&(headers.etherHeader), args->srcMAC, args->opts->destmacaddr, ETHERTYPE_IP);
+	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, args->opts->destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	UDPheadPopulate(&(headers.udpHeader), CLIENT_SRCPORT, args->opts->port);
 	if(args->opts->mode_ub==PINGLIKE) {
-		// Timestampless request in HARDWARE/SOFTWARE mode, as timestamps are directly gathered and managed inside the client (both tx and rx)
-		if(args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
+		if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
 			ctrl=CTRL_PINGLIKE_REQ_TLESS;
 		} else {
 			ctrl=CTRL_PINGLIKE_REQ;
@@ -248,36 +275,57 @@ static void txLoop (arg_struct_udp *args) {
 			ctrl=CTRL_UNIDIR_CONTINUE;
 		}
 	}
-	lampHeadPopulate(&lampHeader, ctrl, lamp_id_session, 0); // Starting from sequence number = 0
+	lampHeadPopulate(&(headers.lampHeader), ctrl, lamp_id_session, 0); // Starting from sequence number = 0
 
 	// Allocating packet buffers (with and without payload)
 	if(args->opts->payloadlen!=0) {
-		lampPacket=malloc(sizeof(struct lamphdr)+args->opts->payloadlen);
-		if(!lampPacket) {
+		buffers.lamppacket=malloc(sizeof(struct lamphdr)+args->opts->payloadlen);
+		if(!buffers.lamppacket) {
 			t_tx_error=ERR_MALLOC;
 			pthread_exit(NULL);
 		}
 
 		lampPacketSize=LAMP_HDR_PAYLOAD_SIZE(args->opts->payloadlen);
 	} else {
-		// There is no need to allocate the lamppacket buffer, as the LaMP header will be directly sent as UDP payload
+		// There is no need to allocate the lamppacket buffer, as the LaMP header will be directly encapsulated inside UDP
 		lampPacketSize=LAMP_HDR_SIZE();
 	}
 
+	buffers.udppacket=malloc(UDP_PACKET_SIZE_S(lampPacketSize));
+	if(!buffers.udppacket) {
+		rawBuffersCleanup(buffers);
+		t_tx_error=ERR_MALLOC;
+		pthread_exit(NULL);
+	}
+
+	buffers.ippacket=malloc(IP_UDP_PACKET_SIZE_S(lampPacketSize));
+	if(!buffers.ippacket) {
+		rawBuffersCleanup(buffers);
+		t_tx_error=ERR_MALLOC;
+		pthread_exit(NULL);
+	}
+
+	buffers.ethernetpacket=malloc(ETH_IP_UDP_PACKET_SIZE_S(lampPacketSize));
+	if(!buffers.ethernetpacket) {
+		rawBuffersCleanup(buffers);
+		t_tx_error=ERR_MALLOC;
+		pthread_exit(NULL);
+	}
+
 	memset(&mhdr,0,sizeof(mhdr));
-	// Prepare ancillary data structures, if HARDWARE or SOFTWARE mode is selected (to get send timestamps)
-	if(args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
-		data_iov=malloc(ETH_IP_UDP_PACKET_SIZE_S(sizeof(struct lamphdr)+args->opts->payloadlen));
+	// Prepare ancillary data structures, if HARDWARE/SOFTWARE mode is selected (to get send timestamps)
+	if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
+		data_iov=malloc((ETH_IP_UDP_PACKET_SIZE_S(sizeof(struct lamphdr)+args->opts->payloadlen))*sizeof(byte_t));
 
 		if(!data_iov) {
-			free(lampPacket);
+			rawBuffersCleanup(buffers);
 			t_tx_error=ERR_MALLOC;
 			pthread_exit(NULL);
 		}
 
 		// iovec buffers (scatter/gather arrays) 
 		iov.iov_base=(void *)data_iov;
-		iov.iov_len=ETH_IP_UDP_PACKET_SIZE_S(sizeof(struct lamphdr)+args->opts->payloadlen); // Macro from Rawsock library
+		iov.iov_len=(ETH_IP_UDP_PACKET_SIZE_S(sizeof(struct lamphdr)+args->opts->payloadlen))*sizeof(byte_t); // Macro from Rawsock library
 
 		// Socket address structure (not needed here)
 		mhdr.msg_name=NULL;
@@ -298,13 +346,11 @@ static void txLoop (arg_struct_udp *args) {
 	// Populate payload buffer only if 'payloadlen' is different than 0
 	if(args->opts->payloadlen!=0) {
 		payload_buff=malloc((args->opts->payloadlen)*sizeof(byte_t));
-
 		if(!payload_buff) {
-			free(lampPacket);
-
-			if(data_iov) {
-				free(data_iov);
-			}
+			free(buffers.lamppacket);
+			free(buffers.ethernetpacket);
+			free(buffers.ippacket);
+			free(buffers.udppacket);
 
 			t_tx_error=ERR_MALLOC;
 			pthread_exit(NULL);
@@ -314,6 +360,12 @@ static void txLoop (arg_struct_udp *args) {
 			payload_buff[i]=(byte_t) (i & 15);
 		}
 	}
+
+	// Get "in packet" LaMP header pointer
+	inpacket_lamphdr=(struct lamphdr *) (buffers.ethernetpacket+sizeof(struct ether_header)+sizeof(struct iphdr)+sizeof(struct udphdr));
+
+	// Set end_flag to FLG_CONTINUE
+	end_flag=FLG_CONTINUE;
 
 	// Create and start timer
 	timerCaS_res=timerCreateAndSet(&timerMon, &clockFd, args->opts->interval);
@@ -332,39 +384,48 @@ static void txLoop (arg_struct_udp *args) {
 		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
 			// "Clear the event" by performing a read() on a junk variable
 			read(clockFd,&junk,sizeof(junk));
+			
+			// Prepare datagram
+			IP4headAddID(&(headers.ipHeader),(unsigned short) id);
+			id+=INCR_ID;
 
-			// Set UNIDIR_STOP or PINGLIKE_ENDREQ (TLESS for HARDWARE mode) when the last packet has to be transmitted, depending on the current mode_ub ("mode unidirectional/bidirectional")
-			if(counter==args->opts->number-1) {
-				if(args->opts->mode_ub==UNIDIR) {
-					lampSetUnidirStop(&lampHeader);
-				} else if(args->opts->mode_ub==PINGLIKE) {
-					lampSetPinglikeEndreqAll(&lampHeader);
-				}
-			}
-
-			// Encapsulate LaMP payload only if it is available
+			// Encapsulate LaMP payload only it is available
 			if(args->opts->payloadlen!=0) {
-				lampEncapsulate(lampPacket, &lampHeader, payload_buff, args->opts->payloadlen);
-				// Set timestamp
-				lampHeadSetTimestamp((struct lamphdr *)lampPacket,NULL);
+				lampEncapsulate(buffers.lamppacket, &(headers.lampHeader), payload_buff, args->opts->payloadlen);
+				UDPencapsulate(buffers.udppacket,&(headers.udpHeader),buffers.lamppacket,(size_t) lampPacketSize,ipaddrs);
 			} else {
-				lampHeadSetTimestamp(&lampHeader,NULL);
-				lampPacket=(byte_t *)&lampHeader; // The LaMP packet is only composed by the header
+				UDPencapsulate(buffers.udppacket,&(headers.udpHeader),(byte_t *)&(headers.lampHeader),(size_t) lampPacketSize,ipaddrs);
 			}
 
-			if(args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
+			// 'IP4headAddTotLen' may also be skipped since IP4Encapsulate already takes care of filling the length field
+			IP4Encapsulate(buffers.ippacket, &(headers.ipHeader), buffers.udppacket, UDP_PACKET_SIZE_S(lampPacketSize));
+			finalpktsize=etherEncapsulate(buffers.ethernetpacket, &(headers.etherHeader), buffers.ippacket, IP_UDP_PACKET_SIZE_S(lampPacketSize));
+
+			if(args->opts->mode_ub==UNIDIR) {
+				fprintf(stdout,"Sent unidirectional message with destination MAC: " PRI_MAC " (id=%u, seq=%u).\n",
+					MAC_PRINTER(args->opts->destmacaddr), lamp_id_session, counter);
+			}
+
+			// Set end flag to FLG_STOP when it's time to send the last packet
+			if(counter==(args->opts->number-1)) {
+					end_flag=FLG_STOP;
+			}
+
+			if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
 				pthread_mutex_lock(&tslist_mut);
 			}
 
-			if(sendto(args->sData.descriptor,lampPacket,lampPacketSize,NO_FLAGS,(struct sockaddr *)&(args->sData.addru.addrin[1]),sizeof(struct sockaddr_in))!=lampPacketSize) {
-				perror("sendto() for sending LaMP packet failed");
-				fprintf(stderr,"Failed sending latency measurement packet with seq: %u.\nThe execution will terminate now.\n",lampHeader.seq);
+			if(rawLampSend(args->sData.descriptor, args->sData.addru.addrll, inpacket_lamphdr, buffers.ethernetpacket, finalpktsize, end_flag, UDP)) {
+				if(errno==EMSGSIZE) {
+					fprintf(stderr,"Error: EMSGSIZE 90 Message too long.\n");
+				}
+				fprintf(stderr,"Failed sending latency measurement packet with seq: %u.\nThe execution will terminate now.\n",headers.lampHeader.seq);
 				break;
 			}
 
-			// Retrieve tx timestamp if mode is HARDWARE/SOFTWARE (i.e. either HARDWARE or software kernel tx and rx timestamps)
+			// Retrieve tx timestamp if mode is HARDWARE/SOFTWARE
 			// Extract ancillary data with the tx timestamp (if mode is HARDWARE/SOFTWARE)
-			if(args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
+			if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
 				do {
 					if(pollErrqueueWait(args->sData.descriptor,POLL_ERRQUEUE_WAIT_TIMEOUT)<=0) {
 						rcv_bytes=-1;
@@ -395,13 +456,8 @@ static void txLoop (arg_struct_udp *args) {
 				pthread_mutex_unlock(&tslist_mut);
 			}
 
-			if(args->opts->mode_ub==UNIDIR) {
-				fprintf(stdout,"Sent unidirectional message with destination IP %s (id=%u, seq=%u)\n",
-					inet_ntoa(args->opts->destIPaddr), lamp_id_session, counter);
-			}
-
 			// Increase sequence number for the next iteration
-			lampHeadIncreaseSeq(&lampHeader);
+			lampHeadIncreaseSeq(&(headers.lampHeader));
 
 			// Increase counter
 			counter++;
@@ -411,78 +467,95 @@ static void txLoop (arg_struct_udp *args) {
 	// Free payload buffer
 	if(args->opts->payloadlen!=0) {
 		free(payload_buff);
-		// Free the LaMP packet buffer only if it was allocated (otherwise a SIGSEGV may occur if payloadLen is 0)
-		free(lampPacket);
 	}
 
 	// Close timer file descriptor
 	close(clockFd);
+
+	// Free all buffers before exiting
+	// Free the LaMP packet buffer only if it was allocated (otherwise a SIGSEGV may occur if payloadLen is 0)
+	if(buffers.lamppacket) free(buffers.lamppacket);
+	if(data_iov) free(data_iov);
+	free(buffers.udppacket);
+	free(buffers.ippacket);
+	free(buffers.ethernetpacket);
 }
 
 static void *rxLoop_t (void *arg) {
-	arg_struct_udp *args=(arg_struct_udp *) arg;
+	arg_struct *args=(arg_struct *) arg;
 
 	int Wfiledescriptor=-1;
 
-	// Packet buffer with size = maximum LaMP packet length
-	byte_t lampPacket[MAX_LAMP_LEN + LAMP_HDR_SIZE()];
-	// Pointer to the header, inside the packet buffer
-	struct lamphdr *lampHeaderPtr=(struct lamphdr *) lampPacket;
+	// Packet buffer with size = Ethernet MTU
+	byte_t packet[RAW_RX_PACKET_BUF_SIZE];
 
 	// recvfrom variables
 	ssize_t rcv_bytes;
+	size_t UDPpayloadsize; // UDP payload size
 
-	int fu_flag=1; // Flag set to 0 when a follow-up is received after an ENDREPLY or ENDREPLY_TLESS (HARDWARE latencyType only, fixed to 0 for other types)
-	int continueFlag=1; // Flag set to 0 when an ENDREPLY or ENDREPLY_TLESS is received
-	int errorTsFlag=0; // Flag set to 1 when an error occurred in retrieving a timestamp (i.e. if no latency data can be reported for the current packet)
+	struct pktheadersptr_udp headerptrs;
+	byte_t *lampPacket=NULL;
 
-	// RX and TX timestamp containers (plus follow-up and trip time timestamps for the HARDWARE mode)
+	// RX and TX timestamp containers (plus follow-up and trip time timestamps for the HARDWARE/SOFTWARE mode)
 	struct timeval rx_timestamp, tx_timestamp, triptime_timestamp, packet_timestamp;
 	struct scm_timestamping hw_ts;
 
 	// Variable to store the latency (trip time)
 	uint64_t tripTime=0;
-
 	// Variable to store the processing time (server time delta) when using follow-up mode
 	uint64_t tripTimeProc=0;
 
 	// LaMP relevant fields
 	lamptype_t lamp_type_rx;
 	uint16_t lamp_id_rx;
-	uint16_t lamp_seq_rx=0; 
+	uint16_t lamp_seq_rx;
 	uint16_t lamp_payloadlen_rx;
+
+	// struct sockaddr_ll filled by recvfrom() and used to filter out outgoing traffic
+	struct sockaddr_ll addrll;
+	socklen_t addrllLen=sizeof(addrll);
 
 	// SO_TIMESTAMP variables and structs (cmsg)
 	struct msghdr mhdr;
 	struct iovec iov;
-	struct cmsghdr *cmsg=NULL;
+	struct cmsghdr *cmsg = NULL;
 
 	// Ancillary data buffers
-	char ctrlBufSw[CMSG_SPACE(sizeof(struct timeval))];
-	char ctrlBufHw[CMSG_SPACE(sizeof(struct scm_timestamping))];
+	char ctrlBufKrt[CMSG_SPACE(sizeof(struct timeval))];
+	char ctrlBufHwSw[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
-	// struct sockaddr_in to store the source IP address of the received LaMP packets
-	struct sockaddr_in srcAddr;
-	socklen_t srcAddrLen=sizeof(srcAddr);
+	int fu_flag=1; // Flag set to 0 when a follow-up is received after an ENDREPLY or ENDREPLY_TLESS (SOFTWARE or HARDWARE latencyType only, fixed to 0 for other types)
+	int continueFlag=1; // Flag set to 0 when an ENDREPLY or ENDREPLY_TLESS is received
+	int errorTsFlag=0; // Flag set to 1 when an error occurred in retrieving a timestamp (i.e. if no latency data can be reported for the current packet)
+
+	// Container for the source MAC address (read from packet)
+	macaddr_t srcmacaddr_pkt=prepareMacAddrT();
+
+	// Check if the MAC address was properly allocated
+	if(macAddrTypeGet(srcmacaddr_pkt)==MAC_NULL) {
+		t_rx_error=ERR_MALLOC;
+		pthread_exit(NULL);
+	}
 
 	// Set fu_flag to 0 if follow-up mode is disabled
 	if(args->opts->followup_mode==FOLLOWUP_OFF) {
 		fu_flag=0;
 	}
 
-	// Prepare ancillary data structures, if KRT or HARDWARE/SOFTWARE mode is selected
-	if(args->opts->latencyType==KRT || args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
+	// Prepare ancillary data structures, if KRT or HARDWARE or SOFTWARE mode is selected
+	memset(&mhdr,0,sizeof(mhdr));
+	if(args->opts->latencyType==KRT || args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
 		// iovec buffers (scatter/gather arrays)
-		iov.iov_base=lampPacket;
-		iov.iov_len=sizeof(lampPacket);
+		iov.iov_base=packet;
+		iov.iov_len=sizeof(packet);
 
 		// Socket address structure
-		mhdr.msg_name=(void *)&srcAddr;
-		mhdr.msg_namelen=srcAddrLen;
+		mhdr.msg_name=NULL;
+		mhdr.msg_namelen=0;
 
 		// Ancillary data (control message)
-		mhdr.msg_control=args->opts->latencyType!=KRT ? ctrlBufHw : ctrlBufSw;
-        mhdr.msg_controllen=args->opts->latencyType!=KRT ? sizeof(ctrlBufHw) : sizeof(ctrlBufSw);
+		mhdr.msg_control=args->opts->latencyType!=KRT ? ctrlBufHwSw : ctrlBufKrt;
+        mhdr.msg_controllen=args->opts->latencyType!=KRT ? sizeof(ctrlBufHwSw) : sizeof(ctrlBufKrt);
 
         // iovec arrays
 		mhdr.msg_iov=&iov;
@@ -500,16 +573,22 @@ static void *rxLoop_t (void *arg) {
 		}
 	}
 
-	// Start receiving packets (this is the ping-like loop), specifying a "struct sockaddr_in" to recvfrom() in order to obtain the source MAC address
+	// Already get all the packet pointers
+	lampPacket=UDPgetpacketpointers(packet,&(headerptrs.etherHeader),&(headerptrs.ipHeader),&(headerptrs.udpHeader));
+	lampGetPacketPointers(lampPacket,&(headerptrs.lampHeader));
+
+	// From now on, 'payload' should -never- be used if (headerptrs.lampHeader)->payloadLen is 0
+
+	// Start receiving packets until an 'ENDREPLY' one is received (this is the ping-like loop)
 	do {
-		// If in KRT or HARDWARE/SOFTWARE mode, use recvmsg(), otherwise, use recvfrom()
-		if(args->opts->latencyType==KRT || args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
+		// If in KRT mode or HARDWARE/SOFTWARE mode, use (the safe version of) recvmsg(), otherwise, use recvfrom()
+		if(args->opts->latencyType==KRT || args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
 			saferecvmsg(rcv_bytes,args->sData.descriptor,&mhdr,NO_FLAGS);
 		} else {
-			saferecvfrom(rcv_bytes,args->sData.descriptor,lampPacket,MAX_LAMP_LEN,NO_FLAGS,(struct sockaddr *)&srcAddr,&srcAddrLen);
+			saferecvfrom(rcv_bytes,args->sData.descriptor,packet,RAW_RX_PACKET_BUF_SIZE,NO_FLAGS,(struct sockaddr *)&addrll,&addrllLen);
 		}
 
-		// Timeout or generic recvfrom() error occurred
+		// Timeout or other recvfrom() error occurred
 		if(rcv_bytes==-1) {
 			if(errno==EAGAIN) {
 				t_rx_error=ERR_TIMEOUT;
@@ -520,12 +599,33 @@ static void *rxLoop_t (void *arg) {
 			break;
 		}
 
-		// Check whether the packet is really encapsulating LaMP; if it is not, discard packet
-		if(!IS_LAMP(lampHeaderPtr->reserved,lampHeaderPtr->ctrl)) {
+		// Filter out all outgoing packets - [IMPROVEMENT] use BPF instead
+		if(addrll.sll_pkttype==PACKET_OUTGOING) {
 			continue;
 		}
 
-		// If the packet is really a LaMP packet, get the header data (followup_timestamp will be null when a timestampless reply is received in HARDWARE mode)
+		// Go on only if it is a datagram of interest (in our case if it is IPv4/UDP and if has the right destination IP address (i.e. own IP address)
+		if (ntohs((headerptrs.etherHeader)->ether_type)!=ETHERTYPE_IP) { 
+			continue;
+		}
+
+		if ((headerptrs.ipHeader)->protocol!=IPPROTO_UDP || CHECK_IP_ADDR_DST(args->srcIP.s_addr) ||ntohs((headerptrs.udpHeader)->dest)!=CLIENT_SRCPORT) {
+			continue;
+		}
+
+		// Verify checksums
+		// Validate checksum (combined mode: IP+UDP): if it is wrong, discard packet
+		UDPpayloadsize=UDPgetpayloadsize((headerptrs.udpHeader));
+		if(!validateEthCsum(packet, (headerptrs.udpHeader)->check, &((headerptrs.ipHeader)->check), CSUM_UDPIP, (void *) &UDPpayloadsize)) {
+			continue;
+		}
+
+		// Check whether the packet is really encapsulating LaMP; if it is not, discard packet
+		if(!IS_LAMP((headerptrs.lampHeader)->reserved,(headerptrs.lampHeader)->ctrl)) {
+			continue;
+		}
+
+		// If the packet is really a LaMP packet, get the header data
 		lampHeadGetData(lampPacket, &lamp_type_rx, &lamp_id_rx, &lamp_seq_rx, &lamp_payloadlen_rx, &packet_timestamp, NULL);
 
 		// Discard any LaMP packet which is not of interest
@@ -533,14 +633,15 @@ static void *rxLoop_t (void *arg) {
 			continue;
 		}
 
-		// The client is not expected to receive any FOLLOWUP_CTRL at this point!
-		if(lamp_type_rx==FOLLOWUP_CTRL) {
-			continue;
+		if(lamp_type_rx!=PINGLIKE_REPLY && lamp_type_rx!=PINGLIKE_ENDREPLY && lamp_type_rx!=PINGLIKE_REPLY_TLESS && lamp_type_rx!=PINGLIKE_ENDREPLY_TLESS) {
+			if(args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx!=FOLLOWUP_DATA) {
+				continue;
+			}
 		}
 
 		if(lamp_type_rx==PINGLIKE_REPLY || lamp_type_rx==PINGLIKE_ENDREPLY || lamp_type_rx==PINGLIKE_REPLY_TLESS || lamp_type_rx==PINGLIKE_ENDREPLY_TLESS) {
-			// Extract ancillary data (if mode is KRT or if it is HARDWARE)
-			if(args->opts->latencyType==KRT || args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
+			// Extract ancillary data (if mode is KRT or if it is HARDWARE or SOFTWARE)
+			if(args->opts->latencyType==KRT || args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
 				for(cmsg=CMSG_FIRSTHDR(&mhdr);cmsg!=NULL;cmsg=CMSG_NXTHDR(&mhdr, cmsg)) {
 	                if(args->opts->latencyType==KRT && cmsg->cmsg_level==SOL_SOCKET && cmsg->cmsg_type==SO_TIMESTAMP) {
 	                    rx_timestamp=*((struct timeval *)CMSG_DATA(cmsg));
@@ -556,7 +657,7 @@ static void *rxLoop_t (void *arg) {
 				gettimeofday(&rx_timestamp,NULL);
 			}
 
-			if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
+			if(args->opts->latencyType==HARDWARE || args->opts->latencyType==SOFTWARE) {
 				pthread_mutex_lock(&tslist_mut);
 				if(timevalSL_gather(tslist,lamp_seq_rx,&tx_timestamp)) {
 					fprintf(stderr,"Error: could not retrieve transmit timestamp for packet number: %d.\n",lamp_seq_rx);
@@ -569,8 +670,8 @@ static void *rxLoop_t (void *arg) {
 
 			if(errorTsFlag==0) {
 				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-					fprintf(stderr,"Error: negative latency!\nThis could potentually indicate that SO_TIMESTAMP is not working properly on your system.\n");
-					errorTsFlag=1;
+					fprintf(stderr,"Warning: negative latency!\nThis could potentually indicate that SO_TIMESTAMP is not working properly on your system.\n");
+					tripTime=0;
 				}
 			}
 
@@ -594,7 +695,7 @@ static void *rxLoop_t (void *arg) {
 
 		if(args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA) {
 			if(timevalSL_gather(triptimelist,lamp_seq_rx,&triptime_timestamp)) {
-				fprintf(stderr,"Error: unable to compute delay for packet number: %d.\nIt is possible that a follow-up was received before the corresponding reply.\n",lamp_seq_rx);
+				fprintf(stderr,"Error: unable to compute delay for packet number: %d.\nIt is possible that a follow-up was received before the corresponding reply.\nReported time will be null.\n",lamp_seq_rx);
 				errorTsFlag=1;
 			} else {
 				if((triptime_timestamp.tv_sec==0 && triptime_timestamp.tv_usec==0) || (packet_timestamp.tv_sec==0 && packet_timestamp.tv_usec==0)) {
@@ -620,8 +721,11 @@ static void *rxLoop_t (void *arg) {
 		// When using the follow-up mode, data is printed only when both the reply and the follow-up have been received
 		if(args->opts->followup_mode==FOLLOWUP_OFF || (args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA)) {
 			if(tripTime!=0) {
-				fprintf(stdout,"Received a reply from %s (id=%u, seq=%u). Time: %.3f ms (%s)%s\n",
-					inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
+				// Get source MAC address from packet
+				getSrcMAC(headerptrs.etherHeader,srcmacaddr_pkt);
+
+				fprintf(stdout,"Received a reply from " PRI_MAC " (id=%u, seq=%u). Time: %.3f ms (%s)%s\n",
+					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
 					args->opts->followup_mode!=FOLLOWUP_OFF ? " (follow-up)" : "");
 			}
 
@@ -631,8 +735,9 @@ static void *rxLoop_t (void *arg) {
 					fprintf(stdout,"Est. server processing time (follow-up): %.3f\n",(double)tripTimeProc/1000);
 				} else {
 					tripTimeProc=0;
-					fprintf(stdout,"Error in packet from %s (id=%u, seq=%u, rx_bytes=%d).\nThe server could not report any follow-up information about the processing time.\nNo RTT will be computed.\n",
-						inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+					getSrcMAC(headerptrs.etherHeader,srcmacaddr_pkt);
+					fprintf(stdout,"Error in packet from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d).\nThe server could not report any follow-up information about the processing time.\nNo RTT will be computed.\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 				}
 			}
 
@@ -654,20 +759,23 @@ static void *rxLoop_t (void *arg) {
 		}
 	} while(continueFlag || fu_flag);
 
-	if(Wfiledescriptor>0) {
-		closeTfile(Wfiledescriptor);
-	}
+	// Free source MAC address memory area
+	freeMacAddrT(srcmacaddr_pkt);
 
 	pthread_exit(NULL);
 }
 
-static void unidirRxTxLoop (arg_struct_udp *args) {
-	// Packet buffer with size = maximum LaMP packet length
-	byte_t lampPacket[MAX_LAMP_LEN];
-	// Pointer to the header, inside the packet buffer
-	struct lamphdr *lampHeaderPtr=(struct lamphdr *) lampPacket;
-	// Pointer to the payload, inside the packet buffer
-	byte_t *lampPayloadPtr=lampPacket+LAMP_HDR_SIZE();
+static void unidirRxTxLoop (arg_struct *args) {
+	// Packet buffers for Rx
+	byte_t packet[RAW_RX_PACKET_BUF_SIZE];
+	byte_t *payload=NULL;
+	byte_t *lampPacket=NULL;
+
+	// Header pointers
+	struct pktheadersptr_udp headerptrs;
+
+	// UDP payload size container
+	size_t UDPpayloadsize;
 
 	// LaMP relevant fields
 	lamptype_t lamp_type_rx;
@@ -679,13 +787,23 @@ static void unidirRxTxLoop (arg_struct_udp *args) {
 
 	ssize_t rcv_bytes;
 
+	controlRCVdata ACKdata;
+
+	// struct sockaddr_ll filled by recvfrom() and used to filter out outgoing traffic
+	struct sockaddr_ll addrll;
+	socklen_t addrllLen=sizeof(addrll);
+
 	/* --------------------------- Rx part --------------------------- */
+
+	// Already get all the packet pointers for Rx
+	lampPacket=UDPgetpacketpointers(packet,&(headerptrs.etherHeader),&(headerptrs.ipHeader),&(headerptrs.udpHeader));
+	payload=lampGetPacketPointers(lampPacket,&(headerptrs.lampHeader));
 
 	// There's no real loop now, just wait for a correct report and send ACK
 	while(1) {
-		saferecvfrom(rcv_bytes,args->sData.descriptor,lampPacket,MAX_LAMP_LEN,NO_FLAGS,NULL, NULL);
+		saferecvfrom(rcv_bytes,args->sData.descriptor,packet,RAW_RX_PACKET_BUF_SIZE,NO_FLAGS,(struct sockaddr *)&addrll,&addrllLen);
 
-		// Timeout or generic recvfrom() error occurred
+		// Timeout or other recvfrom() error occurred
 		if(rcv_bytes==-1) {
 			if(errno==EAGAIN) {
 				t_rx_error=ERR_TIMEOUT;
@@ -697,8 +815,28 @@ static void unidirRxTxLoop (arg_struct_udp *args) {
 			break;
 		}
 
+		// Filter out all outgoing packets - [IMPROVEMENT] use BPF instead
+		if(addrll.sll_pkttype==PACKET_OUTGOING) {
+			continue;
+		}
+
+		// Go on only if it is a datagram of interest (in our case if it is UDP)
+		if (ntohs((headerptrs.etherHeader)->ether_type)!=ETHERTYPE_IP) { 
+			continue;
+		}
+		if ((headerptrs.ipHeader)->protocol!=IPPROTO_UDP || CHECK_IP_ADDR_DST(args->srcIP.s_addr) || ntohs((headerptrs.udpHeader)->dest)!=CLIENT_SRCPORT) {
+			continue;
+		}
+
+		// Verify checksums
+		// Validate checksum (combined mode: IP+UDP): if it is wrong, discard packet
+		UDPpayloadsize=UDPgetpayloadsize((headerptrs.udpHeader));
+		if(!validateEthCsum(packet, (headerptrs.udpHeader)->check, &((headerptrs.ipHeader)->check), CSUM_UDPIP, (void *) &UDPpayloadsize)) {
+			continue;
+		}
+
 		// Check whether the packet is really encapsulating LaMP; if it is not, discard packet
-		if(!IS_LAMP(lampHeaderPtr->reserved,lampHeaderPtr->ctrl)) {
+		if(!IS_LAMP((headerptrs.lampHeader)->reserved,(headerptrs.lampHeader)->ctrl)) {
 			continue;
 		}
 
@@ -720,22 +858,34 @@ static void unidirRxTxLoop (arg_struct_udp *args) {
 		// Parse report structure (for now, it is encoded as a string for conveniency)
 		// Total packets is known to the client only, in this implementation, and it is already set thanks to reportStructureInit(), which
 		// is setting it to 'opts->number'
-		repscanf((const char *)lampPayloadPtr,&reportData);
+		repscanf((const char *)payload,&reportData);
 
-		if(controlSenderUDP(args,lamp_id_session,1,ACK,0,0,NULL,NULL)<0) {
+		// Fill the ACKdata structure
+		ACKdata.controlRCV.ip=args->opts->destIPaddr;
+		ACKdata.controlRCV.port=CLIENT_SRCPORT;
+		memcpy(ACKdata.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
+
+		if(controlSenderUDP_RAW(args,&ACKdata,lamp_id_session,1,ACK,0,0,NULL,NULL)<0) {
 			fprintf(stderr,"Failed sending ACK.\n");
 			t_rx_error=ERR_SEND;
 		}
 	}
 }
 
-unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
+static void rawBuffersCleanup(struct pktbuffers_udp buffs) {
+	if(buffs.ethernetpacket) free(buffs.ethernetpacket);
+	if(buffs.ippacket) free(buffs.ippacket);
+	if(buffs.udppacket) free(buffs.udppacket);
+	if(buffs.lamppacket) free(buffs.lamppacket);
+}
+
+unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, struct in_addr srcIP, struct options *opts) {
 	// Thread argument structures
-	arg_struct_udp args;
-	arg_struct_followup_listener ful_args;
+	arg_struct args;
+	arg_struct_followup_listener_raw_ip ful_raw_args;
 
 	// Inform the user about the current options
-	fprintf(stdout,"UDP client started, with options:\n\t[socket type] = UDP\n"
+	fprintf(stdout,"UDP client started, with options:\n\t[socket type] = RAW\n"
 		"\t[interval] = %" PRIu64 " ms\n"
 		"\t[reception timeout] = %" PRIu64 " ms\n"
 		"\t[total number of packets] = %" PRIu64 "\n"
@@ -756,6 +906,28 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	} else {
 		fprintf(stdout,"\t[user priority] = %d\n",opts->macUP);
 	}
+
+	if(opts->latencyType==KRT) {
+		// Check if the KRT mode is supported by the current NIC and set the proper socket options
+		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW_RX)<0) {
+		 	perror("socketSetTimestamping() error");
+		    fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
+		    opts->latencyType=USERTOUSER;
+		}
+	}
+
+	// Initialize the report structure
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+
+	// Populate/initialize the 'args' structs
+	args.sData=sData;
+	args.opts=opts;
+	args.srcMAC=srcMAC;
+	args.srcIP=srcIP;
+
+	ful_raw_args.sFd=sData.descriptor; // (populate)
+	ful_raw_args.srcIP=srcIP; // (populate)
+	ful_raw_args.responseType=-1; // (initialize)
 
 	// LaMP ID is randomly generated between 0 and 65535 (the maximum over 16 bits)
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
@@ -778,7 +950,7 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		    opts->latencyType=USERTOUSER;
 		}
 	} else if(opts->latencyType==HARDWARE) {
-		// Check if the HARDWARE mode is supported by the current NIC and set the proper socket options
+		// Check if the HARDWARE (kernel rx+tx timestamps) mode is supported by the current NIC and set the proper socket options
 		if (socketSetTimestamping(sData,SET_TIMESTAMPING_HW)<0) {
 		 	perror("socketSetTimestamping() error");
 		    fprintf(stderr,"Warning: hardware timestamping is not supported. Switching back to user-to-user latency.\n");
@@ -786,26 +958,10 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		}
 	}
 
-	// Initialize the report structure
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
-
-	// Prepare sendto sockaddr_in structure (index 1) for the client
-	memset(&(sData.addru.addrin[1]),0,sizeof(sData.addru.addrin[1]));
-	sData.addru.addrin[1].sin_family=AF_INET;
-	sData.addru.addrin[1].sin_port=htons(opts->port);
-	sData.addru.addrin[1].sin_addr.s_addr=opts->destIPaddr.s_addr;
-
-	// Populate/initialize the 'args' structs
-	args.sData=sData; // (populate)
-	args.opts=opts; // (populate)
-
-	ful_args.sFd=sData.descriptor; // (populate)
-	ful_args.responseType=-1; // (initialize)
-
 	// Start init procedure
 	// Create INIT send and ACK listener threads
 	pthread_create(&initSender_tid,NULL,&initSender,(void *) &args);
-	pthread_create(&ackListenerInit_tid,NULL,&ackListenerInit,(void *) &(sData.descriptor));
+	pthread_create(&ackListenerInit_tid,NULL,&ackListenerInit,(void *) &args);
 
 	// Wait for the threads to finish
 	pthread_join(initSender_tid,NULL);
@@ -813,43 +969,29 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 
 	if(t_tx_error==NO_ERR && t_rx_error==NO_ERR) {
 		if(opts->followup_mode!=FOLLOWUP_OFF) {
-			// If the user has requested the follow-up mode, start the FOLLOWUP request/reply procedure
-			// The client will send a request to the server, which will should "ACCEPT" if it supports
-			//  the requested type of timestamping (depending on which kind of latency type is specified,
-			//  i.e. if HW timestamps are requested, the server will reply with "ACCEPT" if it supports them
-			//  too, or "DENY" if they are not supported".
 			pthread_create(&followupRequestSender_tid,NULL,&followupRequestSender,(void *) &args);
-			pthread_create(&followupReplyListener_tid,NULL,&followupReplyListener,(void *) &ful_args);
+			pthread_create(&followupReplyListener_tid,NULL,&followupReplyListener,(void *) &ful_raw_args);
 
 			// Wait for the threads to finish
 			pthread_join(followupRequestSender_tid,NULL);
 			pthread_join(followupReplyListener_tid,NULL);
 
 			if(t_tx_error!=NO_ERR || t_rx_error!=NO_ERR) {
-				if(opts->latencyType==HARDWARE) {
-					fprintf(stderr,"Warning: cannot determine if the server supports hardware timestamps.\n\tDisabling follow-up messages.\n");
-				} else {
-					fprintf(stderr,"Warning: cannot determine if the server supports the requested timestamps.\n\tDisabling follow-up messages.\n");
-				}
-			    opts->followup_mode=FOLLOWUP_OFF;
+				fprintf(stderr,"Warning: cannot determine if the server supports the requested timestamps.\n\tDisabling follow-up messages.\n");
 			} else {
-				if(ful_args.responseType!=FOLLOWUP_ACCEPT) {
-					if(opts->latencyType==HARDWARE) {
-						fprintf(stderr,"Warning: the server reported that it does not support hardware timestamping.\n\tDisabling follow-up messages.\n");
-					} else {
-						fprintf(stderr,"Warning: the server reported that it does not support the requested follow-up mechanism.\n\tDisabling follow-up messages.\n");
-					}
+				if(ful_raw_args.responseType!=FOLLOWUP_ACCEPT) {
+					fprintf(stderr,"Warning: the server reported that it does not support the requested follow-up mechanism.\n\tDisabling follow-up messages.\n");
 				    opts->followup_mode=FOLLOWUP_OFF;
 				}
 			}
 		}
 
-		// If mode is HARDWARE or SOFTWARE, initialize the data structure to store the tx timestamps and the semaphore 'tx_sem'
+		// If mode is HARDWARE or SOFTWARE, initialize the data structure to store the tx timestamps
 		if(opts->latencyType==HARDWARE || opts->latencyType==SOFTWARE) {
 			tslist=timevalSL_init();
 
 			if(CHECK_SL_NULL(tslist)) {
-				fprintf(stderr,"Warning: unable to allocate/initialize memory for the hardware/software timestamping mode.\n\tSwitching back to user-to-user latency.\n");
+				fprintf(stderr,"Warning: unable to allocate memory for the hardware timestamping mode.\n\tSwitching back to user-to-user latency.\n");
 		    	opts->latencyType=USERTOUSER;
 			}
 		}
@@ -864,7 +1006,6 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 			}
 		}
 
-		// Start rx and tx loops
 		if(opts->mode_ub==PINGLIKE) {
 			// Create a sending thread and a receiving thread, then wait for their termination
 			pthread_create(&txLoop_tid,NULL,&txLoop_t,(void *) &args);

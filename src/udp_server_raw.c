@@ -13,7 +13,7 @@
 #include <inttypes.h>
 #include <linux/errqueue.h>
 #include "common_thread.h"
-#include "Rawsock_lib/ipcsum_alth.h"
+#include "ipcsum_alth.h"
 #include "timer_man.h"
 #include "common_udp.h"
 

@@ -3,7 +3,7 @@
 
 #include <pthread.h>
 #include "common_thread.h"
-#include "Rawsock_lib/rawsock_lamp.h"
+#include "rawsock_lamp.h"
 
 #define LO_ADDR_HEX 0x0100007f
 #define CHECK_IP_ADDR_DST(ip) (headerptrs.ipHeader->daddr!=ip)
