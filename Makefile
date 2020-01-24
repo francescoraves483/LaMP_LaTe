@@ -40,6 +40,7 @@ $(EXECNAME): $(OBJ_CC)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@ mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJ_RAWSOCK_LIB_DIR)/%.o: $(SRC_RAWSOCK_LIB_DIR)/%.c
@@ -47,3 +48,7 @@ $(OBJ_RAWSOCK_LIB_DIR)/%.o: $(SRC_RAWSOCK_LIB_DIR)/%.c
 
 clean:
 	$(RM) $(OBJ_DIR)/*.o $(OBJ_RAWSOCK_LIB_DIR)/*.o
+	-rm -rf $(OBJ_DIR)
+
+fullclean: clean
+	$(RM) $(EXECNAME)
