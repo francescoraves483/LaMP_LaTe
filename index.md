@@ -5,7 +5,7 @@
 
 ## What is LaTe?
 
-**LaTe** is a flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.4-beta_.
+**LaTe** is a flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.5-beta_.
 
 This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
 
@@ -219,7 +219,7 @@ After giving the termination command, the current session will run until it will
 
 # Version information
 
-The current version is **0.1.4-beta**, using **LaMP rev 2.0** and **Rawsock library v0.3.1**.
+The current version is **0.1.5-beta**, using **LaMP rev 2.0** and **Rawsock library v0.3.1**.
 
 Developed in **Politecnico di Torino**, licensed under **GPLv2**.
 
