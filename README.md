@@ -4,7 +4,7 @@
 
 ![](./docs/pics/LaMP_logo.png)
 
-**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.5-beta-development_
+**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.5-beta_
 
 This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
 
@@ -44,3 +44,5 @@ The executable is called `LaTe`.
 Docker images are also available, launching a LaTe server in daemon mode (see the documentation for more information). You can download them from [DockerHub](https://hub.docker.com/u/francescoraves483).
 
 At the moment two images are available: one for testing over wired interfaces and one for testing over wireless interfaces.
+
+**Warning:** Docker images may not include the latest version of LaTe.
