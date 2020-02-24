@@ -13,6 +13,9 @@
 
 #define CSV_EXTENSION_LEN 4 // '.csv' length
 #define CSV_EXTENSION_STR ".csv"
+#define TXRX_STR_LEN 3 // '_tx/_rx' length
+#define TX_STR ".tx"
+#define RX_STR ".rx"
 
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
@@ -27,6 +30,9 @@ static void print_long_info(void) {
 		"<destination address>:\n"
 		"  This is the destination address of the server. It depends on the protocol.\n"
 		"  UDP: <destination address> = <destination IP address>\n"
+		#if AMQP_1_0_ENABLED
+		"  AMQP 1.0: <destination address> = <broker address>\n"
+		#endif
 		"\n"
 
 		"[mode]:\n"
@@ -34,16 +40,30 @@ static void print_long_info(void) {
 		"  -B: ping-like bidirectional mode\n"
 		"  -U: unidirectional mode (requires clocks to be perfectly synchronized - highly experimental\n"
 		"\t  - use at your own risk!)\n"
+		#if AMQP_1_0_ENABLED
+		"\n"
+		"  When using AMQP 1.0, only -U is supported. The LaMP client will act as producer and the LaMP\n"
+		"\t  server as consumer. The only supported latency type is User-to-user, at the moment.\n"
+		#endif
 		"\n"
 
 		"[protocol]:\n"
 		"  Protocol to be used, in which the LaMP packets will be encapsulated.\n"
 		"  -u: UDP\n"
+		#if AMQP_1_0_ENABLED
+		"  -a: AMQP 1.0 (using the Qpid Proton C library) - non raw sockets only - no loopback\n"
+		#endif
 		"\n"
 
 		"[options] - Mandatory client options:\n"
 		"  -M <destination MAC address>: specifies the destination MAC address.\n"
 		"\t  Mandatory only if socket is RAW ('-r' is selected) and protocol is UDP.\n"
+		#if AMQP_1_0_ENABLED
+		"  -q <queue name>: name of an AMQP queue or topic (prepend with topic://) to be used. Client and server\n"
+		"\t  shall use the same queue name. This options applies only when AMQP 1.0 is used as a protocol.\n"
+		"\t  Two queues will be created: one for producer-to-consumer communication (.tx will be appended) and\n"
+		"\t  one from consumer-to-producer communication (.rx will be appended.\n"
+		#endif
 		"\n"
 
 		"[options] - Optional client options:\n"
@@ -67,22 +87,38 @@ static void print_long_info(void) {
 		"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
 		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
+		#if AMQP_1_0_ENABLED
+		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+		#endif
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
-		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d).\n"
+		#if AMQP_1_0_ENABLED
+		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+		#endif
+		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
 		"  -C <confidence interval mask>: specifies an integer (mask) telling the program which confidence\n"
 		"\t  intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99\n"
 		"\t  7=.90/.95/.99 (default: %d).\n"
 		"  -F: enable the LaMP follow-up mechanism. At the moment only the ping-like mode is supporting this.\n"
 		"\t  This mechanism will send an additional follow-up message after each server reply, containing an\n"
 		"\t  estimate of the server processing time, which is computed depending on the chosen latency type.\n"
+		"  -T <time in ms>: Manually set a client timeout. The client timeout is always computed as:\n"
+		"\t  (%d + x) ms if |-t value| <= %d ms or (|-t value| + x) ms if |-t value| > %d ms; with -T you can\n"
+		"\t  set the 'x' value, in ms (default: %d)\n"
 		"  -W <filename, without extension>: write, for the current test only, the single packet latency\n"
 		"\t  measurement data to the specified CSV file. If the file already exists, data will be appended\n"
 		"\t  to the file, with a new header line. Warning! This option may negatively impact performance.\n"
+		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
+		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
+		"\t  when this mode is activated.\n"
 		"\n"
 
 		"[options] - Mandatory server options:\n"
+		#if AMQP_1_0_ENABLED
+		"  -H: specify the address of the AMQP 1.0 broker.\n"
+		#else
 		"   <none>"
+		#endif
 		"\n"
 
 		"[options] - Optional server options:\n"
@@ -102,8 +138,14 @@ static void print_long_info(void) {
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
-		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d).\n"
+		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
 		"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
+		"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n"
+		"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n"
+		"\t  'printf' is called before sending a reply.\n"
+		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
+		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
+		"\t  when this mode is activated.\n"
 		"\n"
 
 		"Example of usage:\n"
@@ -128,12 +170,12 @@ static void print_long_info(void) {
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Basic help
 		CLIENT_DEF_NUMBER, // Optional client options
 		CLIENT_DEF_INTERVAL, // Optional client options
-		DEFAULT_UDP_PORT,DEF_CONFIDENCE_INTERVAL_MASK, // Optional client options
+		DEFAULT_LATE_PORT,DEF_CONFIDENCE_INTERVAL_MASK,MIN_TIMEOUT_VAL_C,MIN_TIMEOUT_VAL_C,MIN_TIMEOUT_VAL_C,CLIENT_DEF_TIMEOUT, // Optional client options
 		MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,SERVER_DEF_TIMEOUT, // Optional server options
-		DEFAULT_UDP_PORT, // Optional server options
+		DEFAULT_LATE_PORT, // Optional server options
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Example of usage
-		DEFAULT_UDP_PORT,CLIENT_DEF_NUMBER,CLIENT_DEF_INTERVAL,PROG_NAME_SHORT, // Example of usage
-		DEFAULT_UDP_PORT,SERVER_DEF_TIMEOUT,PROG_NAME_SHORT, // Example of usage
+		DEFAULT_LATE_PORT,CLIENT_DEF_NUMBER,CLIENT_DEF_INTERVAL,PROG_NAME_SHORT, // Example of usage
+		DEFAULT_LATE_PORT,SERVER_DEF_TIMEOUT,PROG_NAME_SHORT, // Example of usage
 		GITHUB_LINK); // Source code link
 
 		fprintf(stdout,"\nAvailable interfaces (use -I <index> to bind to a specific WLAN interface,\n"
@@ -165,6 +207,7 @@ void options_initialize(struct options *options) {
 	options->mode_cs=UNSET_MCS;
 	options->mode_ub=UNSET_MUB;
 	options->interval=0;
+	options->client_timeout=CLIENT_DEF_TIMEOUT;
 	options->number=CLIENT_DEF_NUMBER;
 	options->payloadlen=0;
 
@@ -175,8 +218,8 @@ void options_initialize(struct options *options) {
 	options->init=INIT_CODE;
 
 	// IP-UDP specific (should be inserted inside a union when other protocols will be implemented)
-	options->destIPaddr.s_addr=0;
-	options->port=DEFAULT_UDP_PORT;
+	options->dest_addr_u.destIPaddr.s_addr=0;
+	options->port=DEFAULT_LATE_PORT;
 
 	for(i=0;i<6;i++) {
 		options->destmacaddr[i]=0x00;
@@ -199,19 +242,32 @@ void options_initialize(struct options *options) {
 	options->followup_mode=FOLLOWUP_OFF;
 	options->refuseFollowup=0;
 
+	options->verboseFlag=0;
+
 	options->Wfilename=NULL;
+
+	options->printAfter=0;
+
+	options->dest_addr_u.destAddrStr=NULL;
+
+	#if AMQP_1_0_ENABLED
+	options->queueNameTx=NULL;
+	options->queueNameRx=NULL;
+	#endif
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
 	int char_option;
 	int values[6];
 	int i; // for loop index
-	uint8_t v_flag=0; // =1 if -v was selected, in order to exit immediately after reporting the requested information
-	uint8_t M_flag=0; // =1 if a destination MAC address was specified. If it is not, and we are running in raw server mode, report an error
-	uint8_t L_flag=0; // =1 if a latency type was explicitely defined (with -L), otherwise = 0
-	uint8_t eI_flag=0; // =1 if either -e or -I (or both) was specified, otheriwse = 0
-	uint8_t C_flag=0; // =1 if -C was specified, otheriwise = 0
-	uint8_t F_flag=0; // =1 if -F was specified, otherwise = 0
+	uint8_t v_flag=0; // = 1 if -v was selected, in order to exit immediately after reporting the requested information
+	uint8_t M_flag=0; // = 1 if a destination MAC address was specified. If it is not, and we are running in raw server mode, report an error
+	uint8_t L_flag=0; // = 1 if a latency type was explicitely defined (with -L), otherwise = 0
+	uint8_t eI_flag=0; // = 1 if either -e or -I (or both) was specified, otheriwse = 0
+	uint8_t C_flag=0; // = 1 if -C was specified, otheriwise = 0
+	uint8_t F_flag=0; // = 1 if -F was specified, otherwise = 0
+	uint8_t T_flag=0; // = 1 if -T was specified, otherwise = 0
+
 	/* 
 	   The p_flag has been inserted only for future use: it is set as a port is explicitely defined. This allows to check if a port was specified
 	   for a protocol without the concept of 'port', as more protocols will be implemented in the future. In that case, it will be possible to
@@ -220,6 +276,13 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t p_flag=0; // =1 if a port was explicitely specified, otherwise = 0
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
+
+	#if AMQP_1_0_ENABLED
+	size_t queueNameLen=0; // Queue name length for the '-q' mode
+	uint8_t H_flag=0; // =1 if -H was specified, otherwise = 0
+	#endif
+
+	size_t destAddrLen=0; // Destination address string length
 
 	if(options->init!=INIT_CODE) {
 		fprintf(stderr,"parse_options: you are trying to parse the options without initialiting\n"
@@ -236,6 +299,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			case 'u':
 				options->protocol=UDP;
 				break;
+
+			#if AMQP_1_0_ENABLED
+			case 'a':
+				options->protocol=AMQP_1_0;
+				// Artificially change the default port to the AMQP default port (i.e. 5672)
+				options->port=5672;
+				break;
+			#endif
 
 			case 'r':
 				fprintf(stderr,"Warning: root privilieges are required to use raw sockets.\n");
@@ -283,9 +354,17 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					print_short_info_err(options);
 				}
 
-				// If everything is ok, parse the destination IP address
-				if(inet_pton(AF_INET,optarg,&(options->destIPaddr))!=1) {
-					fprintf(stderr,"Error in parsing the destination IP address (required with -s).\n");
+				// Parse string after -c (it will be kept as it is for AMQP 1.0, if enabled, or converted to an IP address for UDP/TCP/etc...)
+				destAddrLen=strlen(optarg)+1;
+				if(destAddrLen>1) {
+					options->dest_addr_u.destAddrStr=malloc((destAddrLen)*sizeof(char));
+					if(!options->dest_addr_u.destAddrStr) {
+						fprintf(stderr,"Error in parsing the specified destinatio address: cannot allocate memory.\n");
+						print_short_info_err(options);
+					}
+					strncpy(options->dest_addr_u.destAddrStr,optarg,destAddrLen);
+				} else {
+					fprintf(stderr,"Error in parsing the filename: null string length.\n");
 					print_short_info_err(options);
 				}
 				break;
@@ -335,6 +414,13 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			case 'p':
 				errno=0; // Setting errno to 0 as suggested in the strtol() man page
 				options->port=strtoul(optarg,&sPtr,0);
+
+				// Only if AMQP 1.0 is active, save a string with the port too, as it can be useful later on, without the need of converting
+				// this value from unsigned long to char* again
+				#if AMQP_1_0_ENABLED
+				strncpy(options->portStr,optarg,MAX_PORT_STR_SIZE);
+				#endif
+
 				if(sPtr==optarg) {
 					fprintf(stderr,"Cannot find any digit in the specified port.\n");
 					print_short_info_err(options);
@@ -381,6 +467,28 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				fprintf(stdout,"%s, version %s, date %s\n",PROG_NAME_LONG,VERSION,DATE);
 				v_flag=1;
 				break;
+
+			#if AMQP_1_0_ENABLED
+			case 'q':
+				queueNameLen=strlen(optarg)+1;
+				if(queueNameLen>1) {
+					options->queueNameTx=malloc((queueNameLen+TXRX_STR_LEN)*sizeof(char));
+					options->queueNameRx=malloc((queueNameLen+TXRX_STR_LEN)*sizeof(char));
+					if(!options->queueNameTx || !options->queueNameRx) {
+						fprintf(stderr,"Error in parsing the specified queue name: cannot allocate memory.\n");
+						print_short_info_err(options);
+					}
+					strncpy(options->queueNameTx,optarg,queueNameLen);
+					strncat(options->queueNameTx,TX_STR,TXRX_STR_LEN);
+
+					strncpy(options->queueNameRx,optarg,queueNameLen);
+					strncat(options->queueNameRx,RX_STR,TXRX_STR_LEN);
+				} else {
+					fprintf(stderr,"Error in parsing the queue name: null string length.\n");
+					print_short_info_err(options);
+				}
+				break;
+			#endif
 
 			case 'A':
 				// This requires a patched kernel: print a warning!
@@ -458,6 +566,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					"In case you are not sure if the clock is synchronized, please use -B instead.\n");
 				break;
 
+			case 'V':
+				options->verboseFlag=1;
+				break;
+
 			case 'L':
 				if(strlen(optarg)!=1) {
 					fprintf(stderr,"Error: only one character shall be specified after -L.\n");
@@ -524,8 +636,44 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				}
 				break;
 
+			case 'T':
+				errno=0;
+				options->client_timeout=strtoul(optarg,&sPtr,0);
+				if(sPtr==optarg) {
+					fprintf(stderr,"Cannot find any digit in the specified time interval.\n");
+					print_short_info_err(options);
+				} else if(errno) {
+					fprintf(stderr,"Error in parsing the client timeout value.\n");
+					print_short_info_err(options);
+				}
+				T_flag=1;
+				break;
+
+			#if AMQP_1_0_ENABLED
+			case 'H':
+				// Parse string after -H (AMQP 1.0 only)
+				destAddrLen=strlen(optarg)+1;
+				if(destAddrLen>1) {
+					options->dest_addr_u.destAddrStr=malloc((destAddrLen)*sizeof(char));
+					if(!options->dest_addr_u.destAddrStr) {
+						fprintf(stderr,"Error in parsing the specified destination address: cannot allocate memory.\n");
+						print_short_info_err(options);
+					}
+					strncpy(options->dest_addr_u.destAddrStr,optarg,destAddrLen);
+				} else {
+					fprintf(stderr,"Error in parsing the destination address: null string length.\n");
+					print_short_info_err(options);
+				}
+
+				H_flag=1;
+			#endif
+
 			case '0':
 				options->refuseFollowup=1;
+				break;
+
+			case '1':
+				options->printAfter=1;
 				break;
 
 			default:
@@ -543,11 +691,23 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		fprintf(stderr,"Error: a mode must be specified, either client (-c) or server (-s).\n");
 		print_short_info_err(options);
 	} else if(options->mode_cs==CLIENT) {
+		// Parse destination IP address if protocol is not AMQP
+		if(options->protocol==UDP) {
+			struct in_addr destIPaddr_tmp;
+			if(inet_pton(AF_INET,options->dest_addr_u.destAddrStr,&(destIPaddr_tmp))!=1) {
+				fprintf(stderr,"Error in parsing the destination IP address (required with -s).\n");
+				print_short_info_err(options);
+			}
+			free(options->dest_addr_u.destAddrStr);
+
+			options->dest_addr_u.destIPaddr=destIPaddr_tmp;
+		}
+
 		if(options->mode_raw==RAW && M_flag==0) {
 			fprintf(stderr,"Error: in this initial version, the raw client requires the destionation MAC address too (with -M).\n");
 			print_short_info_err(options);
 		}
-		if(options->protocol==UDP && options->destIPaddr.s_addr==0) {
+		if(options->protocol==UDP && options->dest_addr_u.destIPaddr.s_addr==0) {
 			fprintf(stderr,"Error: when in UDP client mode, an IP address should be correctly specified.\n");
 			print_short_info_err(options);
 		}
@@ -555,12 +715,18 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: in client mode either ping-like (-B) or unidirectional (-U) communication should be specified.\n");
 			print_short_info_err(options);
 		}
+		if(options->printAfter==1) {
+			fprintf(stderr,"Warning: -1 was specified but it will be ignored, as it is a server only option.\n");
+		}
 	} else if(options->mode_cs==SERVER) {
 		if(options->mode_ub!=UNSET_MUB) {
 			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
 		}
 		if(C_flag==1) {
 			fprintf(stderr,"Warning: -C is a client-only option. It will be ignored.\n");
+		}
+		if(T_flag==1) {
+			fprintf(stderr,"Warning: -T is a client-only option. It will be ignored.\n");
 		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
@@ -574,6 +740,9 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(options->mode_ub==UNSET_MUB) {
 			fprintf(stderr,"Error: in loopback client mode either ping-like (-B) or unidirectional (-U) communication should be specified.\n");
 			print_short_info_err(options);
+		}
+		if(options->printAfter==1) {
+			fprintf(stderr,"Warning: -1 was specified but it will be ignored, as it is a server only option.\n");
 		}
 	} else if(options->mode_cs==LOOPBACK_SERVER) {
 		if(eI_flag==1) {
@@ -590,7 +759,60 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(C_flag==1) {
 			fprintf(stderr,"Warning: -C is a client-only option. It will be ignored.\n");
 		}
+		if(T_flag==1) {
+			fprintf(stderr,"Warning: -T is a client-only option. It will be ignored.\n");
+		}
 	}
+
+	#if AMQP_1_0_ENABLED
+	// No raw sockets are supported for AMQP 1.0
+	if(options->protocol==AMQP_1_0) {
+		if(options->mode_raw==RAW) {
+			fprintf(stderr,"Error: AMQP 1.0 does not support raw sockets yet.\n");
+			print_short_info_err(options);
+		}
+
+		if(options->mode_cs==CLIENT && H_flag==1) {
+			fprintf(stderr,"Error: -H is a server only AMQP 1.0 option.\n");
+			print_short_info_err(options);
+		}
+
+		if(options->mode_cs==SERVER && H_flag==0) {
+			fprintf(stderr,"Error: running in LaMP server mode but no broker address specified.\n");
+			fprintf(stderr,"Please specify one with -H.\n");
+			print_short_info_err(options);
+		}
+
+		// No -e or -I can be specified (print a warning telling that they will be ignored)
+		if(eI_flag==1) {
+			fprintf(stderr,"Warning: -e or -I was specified but it will be ignored.\n");
+		}
+
+		// Only undirectional mode is supported as of now (with consumer/producer which can be run
+		//  on the same PC, or on different devices if they have a synchronized clock)
+		if(options->mode_ub==PINGLIKE) {
+			fprintf(stderr,"Error: AMQP 1.0 does not support bidirectional mode yet.\n");
+			print_short_info_err(options);
+		}
+
+		// No loopback client is supported for AMQP 1.0
+		if(options->mode_cs==LOOPBACK_CLIENT || options->mode_cs==LOOPBACK_SERVER) {
+			fprintf(stderr,"Error: AMQP 1.0 does not support loopback clients/servers.\n");
+			print_short_info_err(options);
+		}
+
+		if(options->macUP!=UINT8_MAX) {
+			fprintf(stderr,"Warning: no priority can be set for AMQP 1.0 packets for the time being.\n");
+			fprintf(stderr,"\t The specified Access Category will be ignored.\n");
+		}
+
+		// Only user-to-user latency is supported with AMQP 1.0, for the moment
+		if(options->latencyType!=USERTOUSER) {
+			fprintf(stderr,"Error: you specified latency type '%c' but only user-to-user is supported with AMQP 1.0.\n",options->latencyType);
+			print_short_info_err(options);
+		}
+	}
+	#endif
 
 	if(options->interval==0) {
 		if(options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) {
@@ -700,10 +922,24 @@ void options_free(struct options *options) {
 	if(options->Wfilename) {
 		free(options->Wfilename);
 	}
+
+	#if AMQP_1_0_ENABLED
+	if(options->queueNameTx) {
+		free(options->queueNameTx);
+	}
+
+	if(options->queueNameRx) {
+		free(options->queueNameRx);
+	}
+
+	if(options->protocol==AMQP_1_0 && options->dest_addr_u.destAddrStr) {
+		free(options->dest_addr_u.destAddrStr);
+	}
+	#endif
 }
 
 void options_set_destIPaddr(struct options *options, struct in_addr destIPaddr) {
-	options->destIPaddr=destIPaddr;
+	options->dest_addr_u.destIPaddr=destIPaddr;
 }
 
 const char * latencyTypePrinter(latencytypes_t latencyType) {

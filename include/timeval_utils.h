@@ -41,11 +41,11 @@ static inline int timevalSub(struct timeval *in, struct timeval *out) {
 	}
 
 	/* Compute the time remaining to wait.
-	@code{tv_usec} is certainly positive. */
+	tv_usec is certainly positive. */
 	out->tv_sec-=in->tv_sec;
 	out->tv_usec-=in->tv_usec;
 
-	/* Return 1 if result is negative. */
+	/* Return 1 if the result is negative. */
 	return original_out_tv_sec < in->tv_sec;
 }
 

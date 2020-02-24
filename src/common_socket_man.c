@@ -4,6 +4,7 @@
 #include <linux/ethtool.h>
 #include <sys/ioctl.h>
 #include <poll.h>
+#include <unistd.h>
 
 int socketCreator(protocol_t protocol) {
 	int sFd;
@@ -18,6 +19,145 @@ int socketCreator(protocol_t protocol) {
 	}
 
 	return sFd;
+}
+
+int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct options *opts,struct src_addrs *addressesptr) {
+	// wlanLookup index and return value
+	int wlanLookupIdx=0;
+	int ret_wlanl_val;
+
+	// Only UDP is supported as of now
+	if(protocol!=UDP) {
+		return 0;
+	}
+
+	// Set wlanLookupIdx, depending on the mode (loopback vs normal mode)
+	if(opts->mode_cs==LOOPBACK_CLIENT || opts->mode_cs==LOOPBACK_SERVER) {
+		wlanLookupIdx=WLANLOOKUP_LOOPBACK;
+	} else {
+		wlanLookupIdx=opts->if_index;
+	}
+
+	// Allocate memory for the source MAC address (only if 'RAW' is specified)
+	if(opts->mode_raw==RAW) {
+		addressesptr->srcmacaddr=prepareMacAddrT();
+		if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
+			fprintf(stderr,"Error: could not allocate memory to store the source MAC address.\n");
+			return 0;
+		}
+	}
+
+	// Null the devname field in sData
+	memset(sData->devname,0,IFNAMSIZ*sizeof(char));
+
+	// Look for available wireless/non-wireless interfaces
+	ret_wlanl_val=wlanLookup(sData->devname,&(sData->ifindex),addressesptr->srcmacaddr,&(addressesptr->srcIPaddr),wlanLookupIdx,opts->nonwlan_mode==0 ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
+	if(ret_wlanl_val<=0) {
+		rs_printerror(stderr,ret_wlanl_val);
+		return 0;
+	}
+
+	if(opts->mode_raw==RAW) {
+		if(opts->dest_addr_u.destIPaddr.s_addr==addressesptr->srcIPaddr.s_addr) {
+			fprintf(stderr,"Error: you cannot test yourself in raw mode.\n"
+				"Use non raw sockets instead.\n");
+			return 0;
+		}
+
+		// Just for the sake of safety, check if wlanLookup() was able to properly write the source MAC address
+		if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
+			fprintf(stderr,"Could not retrieve source MAC address.\n");
+			return 0;
+		}
+	}
+
+	// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
+	if(opts->mode_cs==LOOPBACK_CLIENT || opts->mode_cs==LOOPBACK_SERVER) {
+		options_set_destIPaddr(opts,addressesptr->srcIPaddr);
+	}
+
+	return 1;
+}
+
+// socketOpen will automalically close the socket in case of error
+int socketOpen(protocol_t protocol,struct lampsock_data *sData,struct options *opts,struct src_addrs *addressesptr) {
+	// Only UDP is supported as of now
+	if(protocol!=UDP) {
+		return 0;
+	}
+
+	// Open socket, discriminating the raw and non raw cases
+	switch(opts->mode_raw) {
+		case RAW:
+			// Workaraound for hardware receive timestamps: ETH_P_ALL does not seem to generate
+			// receive timestamps, as of now. So, as UDP only is currently supported, use ETH_P_IP
+			// instead of ETH_P_ALL. This will hopefully change in the future.
+			sData->descriptor=socket(AF_PACKET,SOCK_RAW,htons(ETH_P_IP));
+
+			if(sData->descriptor==-1) {
+				perror("socket() error");
+				return 0;
+			}
+
+			// Prepare sockaddr_ll structure
+			memset(&(sData->addru.addrll),0,sizeof(sData->addru.addrll));
+			sData->addru.addrll.sll_ifindex=sData->ifindex;
+			sData->addru.addrll.sll_family=AF_PACKET;
+			sData->addru.addrll.sll_protocol=htons(ETH_P_IP);
+
+			// Bind to the specified interface
+			if(bind(sData->descriptor,(struct sockaddr *) &(sData->addru.addrll),sizeof(sData->addru.addrll))<0) {
+				perror("Cannot bind to interface: bind() error");
+				close(sData->descriptor);
+				return 0;
+			}
+			break;
+
+		case NON_RAW:
+			// Add a nested switch case here when more than one protocol will be implemented (*)
+			sData->descriptor=socketCreator(UDP);
+
+			if(sData->descriptor==-1) {
+				perror("socket() error");
+				return 0;
+			}
+
+			// case UDP: (*) - when more than one protocol will be implemented...
+			// Prepare bind sockaddr_in structure (index 0)
+			memset(&(sData->addru.addrin[0]),0,sizeof(sData->addru.addrin[0]));
+			sData->addru.addrin[0].sin_family=AF_INET;
+
+			if(opts->mode_cs==CLIENT || opts->mode_cs==LOOPBACK_CLIENT) {
+				sData->addru.addrin[0].sin_port=0;
+			} else if(opts->mode_cs==SERVER || opts->mode_cs==LOOPBACK_SERVER) {
+				sData->addru.addrin[0].sin_port=htons(opts->port);
+			}
+
+			sData->addru.addrin[0].sin_addr.s_addr=addressesptr->srcIPaddr.s_addr;
+
+			// Bind to the specified interface
+			if(bind(sData->descriptor,(struct sockaddr *) &(sData->addru.addrin[0]),sizeof(sData->addru.addrin[0]))<0) {
+				perror("Cannot bind to interface: bind() error");
+				close(sData->descriptor);
+				return 0;
+			}
+			break;
+
+		default:
+			// Should never enter here
+			sData->descriptor=-1;
+			break;
+	}
+
+
+	// Only if -A was specified, set a certain EDCA AC (works only in patched kernels, as of now)
+	if(opts->macUP!=UINT8_MAX && setsockopt(sData->descriptor,SOL_SOCKET,SO_PRIORITY,&(opts->macUP),sizeof(opts->macUP))!=0) {
+		perror("setsockopt() for SO_PRIORITY error");
+		close(sData->descriptor);
+		return 0;
+	}
+
+	return 1;
 }
 
 int socketSetTimestamping(struct lampsock_data sData, int mode) {

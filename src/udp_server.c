@@ -588,8 +588,12 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 			case PINGLIKE:
 				// Transmit the reply as the copy of the request: first, receive the request (see above), then, encapsulate it inside a new LaMP packet 
 				// and send the reply, after printing that a ping-like message with a certain id and sequence number has been received by the client
-				fprintf(stdout,"Received a ping-like message from %s (id=%u, seq=%u, rx_bytes=%d). Replying to client...\n",
-					inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+
+				// Print here that a packet was received as default behaviour
+				if(!opts->printAfter) {
+					fprintf(stdout,"Received a ping-like message from %s (id=%u, seq=%u, rx_bytes=%d). Replying to client...\n",
+						inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+				}
 
 				// Change reply type inside the lampPacket buffer (or ENDREPLY, if this is the last packet), just received
 				// This can be done, without the need of preparing a new packet, by using the lampHeaderPtr pointer (see the definitions at the beginning of this function)
@@ -611,6 +615,12 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 				if(sendto(sData.descriptor,lampPacket,rcv_bytes,NO_FLAGS,(struct sockaddr *)&sData.addru.addrin[1],sizeof(sData.addru.addrin[1]))!=rcv_bytes) {
 					perror("sendto() for sending LaMP packet failed");
 					fprintf(stderr,"UDP server reported that it can't reply to the client with id=%u and seq=%u\n",lamp_id_rx,lamp_seq_rx);
+				}
+
+				// Print here that a packet was received if -1 was specified
+				if(opts->printAfter) {
+					fprintf(stdout,"Received a ping-like message from %s (id=%u, seq=%u, rx_bytes=%d). Reply sent to client...\n",
+						inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 				}
 
 				// If in hardware/software follow-up mode, gather the tx_timestamp from ancillary data

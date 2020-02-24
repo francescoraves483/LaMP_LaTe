@@ -90,7 +90,7 @@ static void *initSender (void *arg) {
 	int return_value;
 	controlRCVdata initData;
 
-	initData.controlRCV.ip=args->opts->destIPaddr;
+	initData.controlRCV.ip=args->opts->dest_addr_u.destIPaddr;
 	initData.controlRCV.port=CLIENT_SRCPORT;
 	initData.controlRCV.session_id=lamp_id_session;
 	memcpy(initData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
@@ -168,7 +168,7 @@ static void *followupRequestSender (void *arg) {
 	}
 
 	if(t_tx_error!=ERR_SEND_FOLLOWUP) {
-		fuData.controlRCV.ip=args->opts->destIPaddr;
+		fuData.controlRCV.ip=args->opts->dest_addr_u.destIPaddr;
 		fuData.controlRCV.port=CLIENT_SRCPORT;
 		fuData.controlRCV.session_id=lamp_id_session;
 		memcpy(fuData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
@@ -260,7 +260,7 @@ static void txLoop (arg_struct *args) {
 	// Populating headers
 	// [IMPROVEMENT] Future improvement: get destination MAC through ARP or broadcasted information and not specified by the user
 	etherheadPopulate(&(headers.etherHeader), args->srcMAC, args->opts->destmacaddr, ETHERTYPE_IP);
-	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, args->opts->destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, args->opts->dest_addr_u.destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
 	UDPheadPopulate(&(headers.udpHeader), CLIENT_SRCPORT, args->opts->port);
 	if(args->opts->mode_ub==PINGLIKE) {
 		if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
@@ -861,7 +861,7 @@ static void unidirRxTxLoop (arg_struct *args) {
 		repscanf((const char *)payload,&reportData);
 
 		// Fill the ACKdata structure
-		ACKdata.controlRCV.ip=args->opts->destIPaddr;
+		ACKdata.controlRCV.ip=args->opts->dest_addr_u.destIPaddr;
 		ACKdata.controlRCV.port=CLIENT_SRCPORT;
 		memcpy(ACKdata.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
 
@@ -896,7 +896,7 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		"\t[follow-up] = %s\n",
 		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+2000 : opts->interval+2000,
 		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
-		opts->payloadlen, inet_ntoa(opts->destIPaddr),
+		opts->payloadlen, inet_ntoa(opts->dest_addr_u.destIPaddr),
 		latencyTypePrinter(opts->latencyType),
 		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On");
 

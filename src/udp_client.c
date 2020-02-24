@@ -397,7 +397,7 @@ static void txLoop (arg_struct_udp *args) {
 
 			if(args->opts->mode_ub==UNIDIR) {
 				fprintf(stdout,"Sent unidirectional message with destination IP %s (id=%u, seq=%u)\n",
-					inet_ntoa(args->opts->destIPaddr), lamp_id_session, counter);
+					inet_ntoa(args->opts->dest_addr_u.destIPaddr), lamp_id_session, counter);
 			}
 
 			// Increase sequence number for the next iteration
@@ -746,7 +746,7 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		"\t[follow-up] = %s\n",
 		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+2000 : opts->interval+2000,
 		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
-		opts->payloadlen, inet_ntoa(opts->destIPaddr),
+		opts->payloadlen, inet_ntoa(opts->dest_addr_u.destIPaddr),
 		latencyTypePrinter(opts->latencyType),
 		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On");
 
@@ -793,7 +793,7 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	memset(&(sData.addru.addrin[1]),0,sizeof(sData.addru.addrin[1]));
 	sData.addru.addrin[1].sin_family=AF_INET;
 	sData.addru.addrin[1].sin_port=htons(opts->port);
-	sData.addru.addrin[1].sin_addr.s_addr=opts->destIPaddr.s_addr;
+	sData.addru.addrin[1].sin_addr.s_addr=opts->dest_addr_u.destIPaddr.s_addr;
 
 	// Populate/initialize the 'args' structs
 	args.sData=sData; // (populate)

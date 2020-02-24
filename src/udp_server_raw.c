@@ -681,8 +681,11 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				// At the next received packet, the memory area pointed by 'packet' should be substituted by the newly received packet,
 				// thus allowing in some way this mechanism of directly replacing bytes inside the received data.
 
-				fprintf(stdout,"Received a ping-like message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Replying to client...\n",
-					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+				// Print here that a packet was received as default behaviour
+				if(!opts->printAfter) {
+					fprintf(stdout,"Received a ping-like message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Replying to client...\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+				}
 
 				// Edit some 'packet' fields
 				// memcpy the MAC addresses
@@ -718,6 +721,12 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				// rawLampSend should also take care of re-computing the checksum, which is changed due to the different fields in the reply packet.
 				if(rawLampSend(sData.descriptor, sData.addru.addrll, headerptrs.lampHeader, packet, rcv_bytes, FLG_NONE, UDP)) {
 					fprintf(stderr,"UDP server reported that it can't reply to the client with id=%u and seq=%u\n",lamp_id_rx,lamp_seq_rx);
+				}
+
+				// Print here that a packet was received if -1 was specified
+				if(opts->printAfter) {
+					fprintf(stdout,"Received a ping-like message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Reply sent to client...\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 				}
 
 				// If in hardware timestamping or software (kernel) follow-up mode, gather the tx_timestamp from ancillary data

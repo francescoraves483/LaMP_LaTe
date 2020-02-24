@@ -5,8 +5,18 @@
 #include <netinet/in.h>
 #include "rawsock_lamp.h" // In order to import the definition of protocol_t
 
-#define VALID_OPTS "hut:n:c:df:svlmop:reA:BC:FM:P:UL:I:W:0"
+#if !AMQP_1_0_ENABLED
+#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:P:UVL:I:W:T:01"
+#else 
+#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:P:UVL:I:W:T:H:01"
+#endif
+
+#if !AMQP_1_0_ENABLED
 #define SUPPORTED_PROTOCOLS "[-u]"
+#else
+#define SUPPORTED_PROTOCOLS "[-u, -a]"
+#endif
+
 #define INIT_CODE 0xAB
 
 #define REPORT_RETRY_INTERVAL_MS 200
@@ -16,7 +26,8 @@
 #define FOLLOWUP_CTRL_RETRY_INTERVAL_MS 100
 #define FOLLOWUP_CTRL_RETRY_MAX_ATTEMPTS 30
 #define CLIENT_SRCPORT 46772
-#define DEFAULT_UDP_PORT 46000
+
+#define DEFAULT_LATE_PORT 46000
 #define MAX_PAYLOAD_SIZE_UDP_LAMP 1448 // Set to 1448 B since: 20 B (IP hdr) + 8 B (UDP hdr) + 24 B (LaMP hdr) + 1448 B (payload) = 1500 B (MTU)
 #define RAW_RX_PACKET_BUF_SIZE (ETHERMTU+14) // Ethernet MTU (1500 B) + 14 B of struct ether_header
 #define MIN_TIMEOUT_VAL_S 1000 // Minimum timeout value for the server (in ms)
@@ -26,6 +37,7 @@
 // Default client interval/server timeout values
 #define CLIENT_DEF_INTERVAL 100 // [ms]
 #define SERVER_DEF_TIMEOUT 4000 // [ms]
+#define CLIENT_DEF_TIMEOUT 2000 // [ms]
 
 // Default number of packets
 #define CLIENT_DEF_NUMBER 600 // [#]
@@ -35,6 +47,9 @@
 
 // Default confidence interval mask
 #define DEF_CONFIDENCE_INTERVAL_MASK 2
+
+// Max port string size (define only when AMQP 1.0 is active)
+#define MAX_PORT_STR_SIZE 6 // 5 characters + final '\0'
 
 // Latency types
 typedef enum {
@@ -79,6 +94,7 @@ struct options {
 	modeub_t mode_ub;
 	moderaw_t mode_raw;
 	uint64_t interval;
+	uint64_t client_timeout;
 	uint64_t number;
 	uint16_t payloadlen; // uint16_t because the LaMP len field is 16 bits long
 	int macUP;
@@ -91,12 +107,23 @@ struct options {
 	uint8_t confidenceIntervalMask; // Confidence interval mask: a user shall specify xx1 to print the .90 intervals, x1x for the .95 ones and 1xx for the .99 ones (default .95 only)
 	modefollowup_t followup_mode; // = FOLLOWUP_OFF if no follow-up mechanism should be used, = FOLLOWUP_ON_* otherwise (default: 0)
 	uint8_t refuseFollowup; // Server only. =1 if the server should deny any follow-up request coming the client, =0 otherwise (default: 0)
+	uint8_t verboseFlag; // =1 if verbose mode is on, =0 otherwise (default: 0, i.e. no -V specified)
 	char *Wfilename; // Filename for the -W mode
+	uint8_t printAfter; // Server only. =0 if the server should print that a packet was received before sending the reply, =1 to print after sending the reply (default: 0)
 
-	// Consider adding a union here when other protocols will be added...
-	struct in_addr destIPaddr;
+	union {
+		struct in_addr destIPaddr;
+		char *destAddrStr;
+	} dest_addr_u;
+
 	unsigned long port;
 	uint8_t destmacaddr[6];
+
+	#if AMQP_1_0_ENABLED
+	char portStr[MAX_PORT_STR_SIZE]; // This is defined and used only when AMQP 1.0 is enabled
+	char *queueNameTx;
+	char *queueNameRx;
+	#endif
 };
 
 void options_initialize(struct options *options);

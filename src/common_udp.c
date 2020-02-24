@@ -75,7 +75,7 @@ int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts
 				pthread_mutex_unlock(termination_flag_mutex);
 
 				if(sendto(args->sData.descriptor,&lampHeader,LAMP_HDR_SIZE(),NO_FLAGS,(struct sockaddr *)&(args->sData.addru.addrin[1]),sizeof(struct sockaddr_in))!=LAMP_HDR_SIZE()) {
-						return -2;
+					return -2;
 				}
 
 				// Successive attempts will have an increased sequence number
