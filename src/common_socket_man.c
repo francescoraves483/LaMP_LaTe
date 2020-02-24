@@ -47,33 +47,41 @@ int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct optio
 		}
 	}
 
-	// Null the devname field in sData
-	memset(sData->devname,0,IFNAMSIZ*sizeof(char));
+	// Look for available wireless/non-wireless interfaces, only if the user did not want to bind to all local interfaces (using option -N)
+	if(opts->nonwlan_mode!=NONWLAN_MODE_ANY) {
+		// Null the devname field in sData
+		memset(sData->devname,0,IFNAMSIZ*sizeof(char));
 
-	// Look for available wireless/non-wireless interfaces
-	ret_wlanl_val=wlanLookup(sData->devname,&(sData->ifindex),addressesptr->srcmacaddr,&(addressesptr->srcIPaddr),wlanLookupIdx,opts->nonwlan_mode==0 ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
-	if(ret_wlanl_val<=0) {
-		rs_printerror(stderr,ret_wlanl_val);
-		return 0;
-	}
-
-	if(opts->mode_raw==RAW) {
-		if(opts->dest_addr_u.destIPaddr.s_addr==addressesptr->srcIPaddr.s_addr) {
-			fprintf(stderr,"Error: you cannot test yourself in raw mode.\n"
-				"Use non raw sockets instead.\n");
+		ret_wlanl_val=wlanLookup(sData->devname,&(sData->ifindex),addressesptr->srcmacaddr,&(addressesptr->srcIPaddr),wlanLookupIdx,opts->nonwlan_mode==NONWLAN_MODE_WIRELESS ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
+		if(ret_wlanl_val<=0) {
+			rs_printerror(stderr,ret_wlanl_val);
 			return 0;
 		}
 
-		// Just for the sake of safety, check if wlanLookup() was able to properly write the source MAC address
-		if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
-			fprintf(stderr,"Could not retrieve source MAC address.\n");
+		if(opts->mode_raw==RAW) {
+			if(opts->dest_addr_u.destIPaddr.s_addr==addressesptr->srcIPaddr.s_addr) {
+				fprintf(stderr,"Error: you cannot test yourself in raw mode.\n"
+					"Use non raw sockets instead.\n");
+				return 0;
+			}
+
+			// Just for the sake of safety, check if wlanLookup() was able to properly write the source MAC address
+			if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
+				fprintf(stderr,"Could not retrieve source MAC address.\n");
+				return 0;
+			}
+		}
+
+		// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
+		if(opts->mode_cs==LOOPBACK_CLIENT || opts->mode_cs==LOOPBACK_SERVER) {
+			options_set_destIPaddr(opts,addressesptr->srcIPaddr);
+		}
+	} else {
+		if(opts->mode_raw==RAW) {
+			fprintf(stderr,"Error: you requested to bind to all local interfaces, but raw sockets require\n"
+				"a specific interface to be defined.\n");
 			return 0;
 		}
-	}
-
-	// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
-	if(opts->mode_cs==LOOPBACK_CLIENT || opts->mode_cs==LOOPBACK_SERVER) {
-		options_set_destIPaddr(opts,addressesptr->srcIPaddr);
 	}
 
 	return 1;
@@ -133,7 +141,11 @@ int socketOpen(protocol_t protocol,struct lampsock_data *sData,struct options *o
 				sData->addru.addrin[0].sin_port=htons(opts->port);
 			}
 
-			sData->addru.addrin[0].sin_addr.s_addr=addressesptr->srcIPaddr.s_addr;
+			if(opts->nonwlan_mode!=NONWLAN_MODE_ANY) {
+				sData->addru.addrin[0].sin_addr.s_addr=addressesptr->srcIPaddr.s_addr;
+			} else {
+				sData->addru.addrin[0].sin_addr.s_addr=INADDR_ANY;
+			}
 
 			// Bind to the specified interface
 			if(bind(sData->descriptor,(struct sockaddr *) &(sData->addru.addrin[0]),sizeof(sData->addru.addrin[0]))<0) {

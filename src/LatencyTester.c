@@ -83,7 +83,9 @@ int main (int argc, char **argv) {
 		}
 
 		// Print current interface name
-		fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",sData.devname,ifindex);
+		fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",
+			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.devname : "(any)",
+			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? ifindex : 0);
 	}
 
 	do {

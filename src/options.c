@@ -92,6 +92,7 @@ static void print_long_info(void) {
 		#endif
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
+		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
 		#if AMQP_1_0_ENABLED
 		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 		#endif
@@ -138,6 +139,7 @@ static void print_long_info(void) {
 		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
+		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
 		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
 		"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
 		"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n"
@@ -234,7 +236,7 @@ void options_initialize(struct options *options) {
 
 	options->latencyType=USERTOUSER; // Default: user-to-user latency
 
-	options->nonwlan_mode=0;
+	options->nonwlan_mode=NONWLAN_MODE_WIRELESS;
 	options->if_index=0;
 
 	options->confidenceIntervalMask=0x02; // Binary 010 as default value: i.e. print only .95 confidence intervals
@@ -267,6 +269,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t C_flag=0; // = 1 if -C was specified, otheriwise = 0
 	uint8_t F_flag=0; // = 1 if -F was specified, otherwise = 0
 	uint8_t T_flag=0; // = 1 if -T was specified, otherwise = 0
+	uint8_t N_flag=0; // = 1 if -N was specified, otherwise = 0
 
 	/* 
 	   The p_flag has been inserted only for future use: it is set as a port is explicitely defined. This allows to check if a port was specified
@@ -459,7 +462,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				break;
 
 			case 'e':
-				options->nonwlan_mode=1;
+				options->nonwlan_mode=NONWLAN_MODE_WIRED;
 				eI_flag=1;
 				break;
 
@@ -545,6 +548,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					options->destmacaddr[i]=(uint8_t) values[i];
 				}
 				M_flag=1;
+				break;
+
+			case 'N':
+				options->nonwlan_mode=NONWLAN_MODE_ANY;
+				N_flag=1;
 				break;
 
 			case 'P':
@@ -811,6 +819,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: you specified latency type '%c' but only user-to-user is supported with AMQP 1.0.\n",options->latencyType);
 			print_short_info_err(options);
 		}
+
+		if(N_flag==1) {
+			fprintf(stderr,"Warning: -N was specified, but for AMQP 1.0 it is already the default option\n"
+				"(i.e. there is no biding to specific interfaces yet).\n");
+		}
 	}
 	#endif
 
@@ -877,6 +890,16 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 	if(options->mode_ub==UNIDIR && F_flag==1) {
 		fprintf(stderr,"Error: '-F' is supported in ping-like mode only, at the moment.\n");
+		print_short_info_err(options);
+	}
+
+	if(eI_flag==1 && N_flag==1) {
+		fprintf(stdout,"Error: -e/-I are incompatible with -N. Please specify only one option.\n");
+		print_short_info_err(options);
+	}
+
+	if(N_flag==1 && options->mode_raw==RAW) {
+		fprintf(stdout,"Error: raw sockets need a specific interface to be specified. You cannot use -N with -r.\n");
 		print_short_info_err(options);
 	}
 

@@ -744,7 +744,7 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		"\t[destination IP address] = %s\n"
 		"\t[latency type] = %s\n"
 		"\t[follow-up] = %s\n",
-		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+2000 : opts->interval+2000,
+		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+opts->client_timeout : opts->interval+opts->client_timeout,
 		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
 		opts->payloadlen, inet_ntoa(opts->dest_addr_u.destIPaddr),
 		latencyTypePrinter(opts->latencyType),

@@ -6,9 +6,9 @@
 #include "rawsock_lamp.h" // In order to import the definition of protocol_t
 
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:P:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:NP:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:P:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:NP:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -50,6 +50,11 @@
 
 // Max port string size (define only when AMQP 1.0 is active)
 #define MAX_PORT_STR_SIZE 6 // 5 characters + final '\0'
+
+// nonwlan_mode values (defined here for readability reasons)
+#define NONWLAN_MODE_WIRELESS 0
+#define NONWLAN_MODE_WIRED 1
+#define NONWLAN_MODE_ANY 2
 
 // Latency types
 typedef enum {
@@ -102,7 +107,7 @@ struct options {
 	uint8_t overwrite; // In '-f' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not append to existing file), otherwise it will be = 0 (default = 0)
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (KRT, gettimeofday()+ancillary data), 'h' (hardware timestamps when supported)
-	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise (default: 0)
+	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise, = 2 if binding to any local interface (default: 0)
 	long if_index; // Interface index to be used (default: 0)
 	uint8_t confidenceIntervalMask; // Confidence interval mask: a user shall specify xx1 to print the .90 intervals, x1x for the .95 ones and 1xx for the .99 ones (default .95 only)
 	modefollowup_t followup_mode; // = FOLLOWUP_OFF if no follow-up mechanism should be used, = FOLLOWUP_ON_* otherwise (default: 0)
