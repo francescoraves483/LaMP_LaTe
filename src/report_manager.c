@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <math.h>
+#include <stdlib.h>
 
 // Condidence interval array sizes
 #define TSTUDSIZE90 125
@@ -368,6 +369,8 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 int openTfile(const char *Tfilename,int followup_on_flag) {
 	int csvfd;
+	char *Tfilename_fileno;
+
 	errno=0;
 
 	if(Tfilename==NULL) {
@@ -378,8 +381,42 @@ int openTfile(const char *Tfilename,int followup_on_flag) {
 
 	if(csvfd<0) {
 		if(errno==EEXIST) {
-			csvfd=open(Tfilename, O_WRONLY | O_APPEND);
+			// File already exists
+			// Try to create a new file, appending an increasing number after <Tfilename>, until W_MAX_FILE_NUMBER attemps are reached
+			int fileno=1;
+			int fileopendone=0;
+
+			Tfilename_fileno=malloc((strlen(Tfilename)+W_MAX_FILE_NUMBER_DIGITS+1)*sizeof(char));
+
+			if(!Tfilename_fileno) {
+				return -3;
+			}
+
+			while(fileno<=W_MAX_FILE_NUMBER && fileopendone==0) {
+				snprintf(Tfilename_fileno,strlen(Tfilename)+W_MAX_FILE_NUMBER_DIGITS+2,"%.*s_%0*d.csv",(int) (strlen(Tfilename)-4),Tfilename,W_MAX_FILE_NUMBER_DIGITS,fileno);
+
+				csvfd=open(Tfilename_fileno, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+				if(csvfd<0 && errno==EEXIST) {
+					fileno++;
+					errno=0;
+				} else {
+					// File open operation done (i.e. the file was opened or an error occurred)
+					fileopendone=1; 
+				}
+			}
+
+			free(Tfilename_fileno);
+
+			// Attempted to create W_MAX_FILE_NUMBER different files but they all already exist
+			// In this case, just append to the original file which was specified
+			if(fileopendone==0) {
+				csvfd=open(Tfilename, O_WRONLY | O_APPEND);
+			}
 		}
+	}
+
+	if(csvfd<0) {
+		return csvfd;
 	}
 
 	// Write CSV file header, depending on the followup_on_flag flag value

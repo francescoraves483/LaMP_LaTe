@@ -377,6 +377,9 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	controlRCVdata fuData;
 
+	// File descriptor for -W option (write per-packet data to CSV file)
+	int Wfiledescriptor=-1;
+
 	// Very important: initialize to 0 any flag that is used inside threads
 	ack_report_received=0;
 	followup_mode_session=FOLLOWUP_OFF;
@@ -456,6 +459,14 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 		// As reported into socket.h, these are the "flags on received message"
 		mhdr.msg_flags=NO_FLAGS;
+	}
+
+	// Open CSV file when '-W' is specified (as this only applies to the unidirectional mode, no file is create when the mode is not unidirectional)
+	if(opts->Wfilename!=NULL && mode_session==UNIDIR) {
+		Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF);
+		if(Wfiledescriptor<0) {
+			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
+		}
 	}
 
 	// Already get all the packet pointers
@@ -671,6 +682,11 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 				// Update the current report structure
 				reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
+
+				// When '-W' is specified, write the current measured value to the specified CSV file too (if a file was successfully opened)
+				if(Wfiledescriptor>0) {
+					writeToTFile(Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,0);
+				}
 			break;
 
 			case PINGLIKE:
@@ -782,6 +798,10 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	if(mode_session==UNIDIR) {
+		if(Wfiledescriptor>0) {
+			closeTfile(Wfiledescriptor);
+		}
+
 		destIP_inaddr.s_addr=headerptrs.ipHeader->saddr;
 		// If the mode is the unidirectional one, get the destination IP/MAC from the last packet
 		// Use as destination IP (destIP), the source IP of the last received packet (headerptrs.ipHeader->saddr)

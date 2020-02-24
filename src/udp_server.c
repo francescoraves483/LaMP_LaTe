@@ -314,6 +314,9 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	// Follow-up reply type: to be used only when a follow-up request is received from the client
 	uint16_t followup_reply_type;
 
+	// File descriptor for -W option (write per-packet data to CSV file)
+	int Wfiledescriptor=-1;
+
 	ack_report_received=0;
 	followup_mode_session=FOLLOWUP_OFF;
 	t_rx_error=NO_ERR;
@@ -393,6 +396,14 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	// Fill the 'args' structure
 	args.sData=sData;
 	args.opts=opts;
+
+	// Open CSV file when '-W' is specified (as this only applies to the unidirectional mode, no file is create when the mode is not unidirectional)
+	if(opts->Wfilename!=NULL && mode_session==UNIDIR) {
+		Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF);
+		if(Wfiledescriptor<0) {
+			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
+		}
+	}
 	
 	if(ackSenderInit(&args)) {
 		thread_error_print("UDP server ACK sender loop", t_tx_error);
@@ -583,6 +594,11 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 
 				// Update the current report structure
 				reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
+
+				// When '-W' is specified, write the current measured value to the specified CSV file too (if a file was successfully opened)
+				if(Wfiledescriptor>0) {
+					writeToTFile(Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,0);
+				}
 			break;
 
 			case PINGLIKE:
@@ -677,6 +693,10 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	}
 
 	if(mode_session==UNIDIR) {
+		if(Wfiledescriptor>0) {
+			closeTfile(Wfiledescriptor);
+		}
+
 		if(transmitReportUDP(sData, opts)) {
 			fprintf(stderr,"UDP server reported an error while transmitting the report.\n"
 				"No report will be transmitted.\n");

@@ -14,6 +14,11 @@
 
 #define CONFINT_NUMBER 3
 
+// Maximum file number to be appended after a filename specified with '-W'
+// After this maximum value is reached, the program will append on the file initially specified with '-W'
+#define W_MAX_FILE_NUMBER 9999
+#define W_MAX_FILE_NUMBER_DIGITS 4
+
 // Macro to write the report into a string
 #define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf", \
 									rep1.minLatency,rep1.averageLatency,rep1.maxLatency,rep1.packetCount, \

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <inttypes.h>
+#include <fcntl.h>
 #include "rawsock.h"
 
 #define CSV_EXTENSION_LEN 4 // '.csv' length
@@ -109,6 +110,7 @@ static void print_long_info(void) {
 		"  -W <filename, without extension>: write, for the current test only, the single packet latency\n"
 		"\t  measurement data to the specified CSV file. If the file already exists, data will be appended\n"
 		"\t  to the file, with a new header line. Warning! This option may negatively impact performance.\n"
+		"\t  This options applies to a client only in ping-like mode.\n"
 		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
 		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
 		"\t  when this mode is activated.\n"
@@ -145,6 +147,10 @@ static void print_long_info(void) {
 		"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n"
 		"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n"
 		"\t  'printf' is called before sending a reply.\n"
+		"  -W <filename, without extension>: write, for the current test only, the single packet latency\n"
+		"\t  measurement data to the specified CSV file. If the file already exists, data will be appended\n"
+		"\t  to the file, with a new header line. Warning! This option may negatively impact performance.\n"
+		"\t  This options applies to a server only in unidirectional mode.\n"
 		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
 		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
 		"\t  when this mode is activated.\n"
@@ -633,13 +639,13 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				if(filenameLen>1) {
 					options->Wfilename=malloc((filenameLen+CSV_EXTENSION_LEN)*sizeof(char));
 					if(!options->Wfilename) {
-						fprintf(stderr,"Error in parsing the filename for the -T mode: cannot allocate memory.\n");
+						fprintf(stderr,"Error in parsing the filename for the -W mode: cannot allocate memory.\n");
 						print_short_info_err(options);
 					}
 					strncpy(options->Wfilename,optarg,filenameLen);
 					strncat(options->Wfilename,CSV_EXTENSION_STR,CSV_EXTENSION_LEN);
 				} else {
-					fprintf(stderr,"Error in parsing the filename for the -T mode: null string length.\n");
+					fprintf(stderr,"Error in parsing the filename for the -W mode: null string length.\n");
 					print_short_info_err(options);
 				}
 				break;
