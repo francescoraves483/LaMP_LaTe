@@ -163,6 +163,11 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 
 			// Update the current report structure
 			reportStructureUpdate(reportPtr,tripTime,lamp_seq_rx);
+
+			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
+			if(aData->Wfiledescriptor>0) {
+				writeToTFile(aData->Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,0);
+			}
 		}
 	}
 
@@ -315,8 +320,18 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 							}
 							pn_proactor_set_timeout(aData->proactor,aData->proactor_timeout);
 
-							// We received the INIT packet, we can update the consumer status
+							// We received the INIT packet, we can update the consumer status and, if -W is specified, open the CSV file to write the per-packet test data to
 							consumerStatus=C_INITRECEIVED;
+
+							// Open CSV file when in "-W" mode (i.e. "write every packet measurement data to CSV file")
+							if(opts->Wfilename!=NULL) {
+								// No follow-up is supported for AMQP 1.0 testing, but, instead of passing just '0' to openTfile() it can be useful to keep
+								//  the check for a possible follow-up mode, as it may be implemented in some way in the future
+								aData->Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF);
+								if(aData->Wfiledescriptor<0) {
+									fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
+								}
+							}
 
 							// We can now send the ACK to the producer
 							if(pn_link_credit(l_tx)<=0) {
@@ -459,6 +474,11 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts) {
 		}
 		pn_proactor_done(aData.proactor,events_batch);
 	} while(!pn_error_condition && consumerStatus!=C_ACKRECEIVED);
+
+	// Close the "per-packet data" CSV file if '-W' was specified and a file was correctly opened
+	if(aData.Wfiledescriptor>0) {
+		closeTfile(aData.Wfiledescriptor);
+	}
 
 	if(opts->filename!=NULL) {
 		// If '-f' was specified, print the report data to a file too

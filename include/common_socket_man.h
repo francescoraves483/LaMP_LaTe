@@ -49,6 +49,8 @@ struct amqp_data {
 	char containerID[CONTAINERID_LEN];
 	char senderName[RECEIVERNAME_LEN];
 	char receiverName[RECEIVERNAME_LEN];
+
+	int Wfiledescriptor; // File descriptor to write per-packet data to a CSV file when -W is specified
 };
 #endif
 

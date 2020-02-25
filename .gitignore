@@ -1,5 +1,6 @@
 # Compiled source
 obj/*.o
+obj-full/*.o
 Rawsock_lib/Rawsock_lib/*.o
 
 # Compiled LaTe executable
@@ -7,3 +8,6 @@ LaTe
 
 # nohup.out file, if the user launches LaTe with nohup (can be useful with daemon mode servers)
 nohup.out
+
+# Any CSV log file that could be present in the main LaTe directory
+*.csv
