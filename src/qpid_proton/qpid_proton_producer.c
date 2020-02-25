@@ -17,7 +17,7 @@
 // A credit of '2' on the receving link should be enough,
 //  as we expect only one ACK and one REPORT to be received
 #define RX_LINK_CREDIT 2
-#define DELIVERYTAG_UNIDIR_SEQ_SIZE 20
+#define DELIVERYTAG_UNIDIR_SEQ_SIZE 21
 
 static producer_status_t producerStatus=P_JUSTSTARTED;
 static uint16_t lamp_id_session;
