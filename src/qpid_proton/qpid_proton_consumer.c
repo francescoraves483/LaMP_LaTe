@@ -149,8 +149,9 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 			}
 
 			if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-				fprintf(stderr,"Error: negative latency for packet from queue/topic %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
-					pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,(int)rx_size-LAMP_PACKET_OFFSET);
+				fprintf(stderr,"Error: negative latency (%.3f ms - %s) for packet from queue/topic %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+						(double) (rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec)/1000,latencyTypePrinter(opts->latencyType),
+						pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,(int)rx_size-LAMP_PACKET_OFFSET);
 				tripTime=0;
 			} else {
 				tripTime=rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec;
@@ -166,7 +167,7 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
 			if(aData->Wfiledescriptor>0) {
-				writeToTFile(aData->Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,0);
+				writeToTFile(aData->Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec,0);
 			}
 		}
 	}

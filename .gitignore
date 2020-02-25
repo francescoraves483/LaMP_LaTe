@@ -1,6 +1,8 @@
 # Compiled source
 obj/*.o
+obj
 obj-full/*.o
+obj-full
 Rawsock_lib/Rawsock_lib/*.o
 
 # Compiled LaTe executable

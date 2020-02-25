@@ -27,7 +27,6 @@ void timevalSL_free(timevalStoreList SL);
 static inline int timevalSub(struct timeval *in, struct timeval *out) {
 	time_t original_out_tv_sec=out->tv_sec;
 
-	/* Perform the carry for the later subtraction by updating @var{y}. */
 	if (out->tv_usec < in->tv_usec) {
 		int nsec = (in->tv_usec - out->tv_usec) / 1000000 + 1;
 		in->tv_usec -= 1000000 * nsec;
@@ -40,12 +39,10 @@ static inline int timevalSub(struct timeval *in, struct timeval *out) {
 		in->tv_sec -= nsec;
 	}
 
-	/* Compute the time remaining to wait.
-	tv_usec is certainly positive. */
 	out->tv_sec-=in->tv_sec;
 	out->tv_usec-=in->tv_usec;
 
-	/* Return 1 if the result is negative. */
+	// '1' is returned when the result is negative
 	return original_out_tv_sec < in->tv_sec;
 }
 

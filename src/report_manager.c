@@ -429,13 +429,13 @@ int openTfile(const char *Tfilename,int followup_on_flag) {
 	return csvfd;
 }
 
-int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,uint64_t tripTime,uint64_t tripTimeProc) {
+int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,int64_t signedTripTime,uint64_t tripTimeProc) {
 	int dprintf_ret_val;
 
 	if(followup_on_flag==0) {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,tripTime==0 ? 1 : 0);
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%d\n",seqNo,decimal_digits,(double)signedTripTime/1000,signedTripTime<=0 ? 1 : 0);
 	} else {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,decimal_digits,(double)tripTimeProc/1000,tripTime==0 ? 1 : 0);
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%d\n",seqNo,decimal_digits,(double)signedTripTime/1000,decimal_digits,(double)tripTimeProc/1000,signedTripTime<=0 ? 1 : 0);
 	}
 
 	return dprintf_ret_val;

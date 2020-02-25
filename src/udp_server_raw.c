@@ -668,7 +668,8 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				}
 
 				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-					fprintf(stderr,"Error: negative latency for packet from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+					fprintf(stderr,"Error: negative latency (%.3f ms - %s) for packet from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+						(double) (rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec)/1000,latencyTypePrinter(opts->latencyType),
 						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 					tripTime=0;
 				} else {
@@ -685,7 +686,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 				// When '-W' is specified, write the current measured value to the specified CSV file too (if a file was successfully opened)
 				if(Wfiledescriptor>0) {
-					writeToTFile(Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,0);
+					writeToTFile(Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec,0);
 				}
 			break;
 
