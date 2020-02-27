@@ -44,9 +44,6 @@ int main (int argc, char **argv) {
 	/* Socket management structure (containing a socket descriptor and a struct sockaddr_ll, see rawsock_lamp.h) */
 	struct lampsock_data sData;
 
-	// Interface index of the selected Linux interface (possibly using the -e/-I options)
-	int ifindex;
-
 	#if AMQP_1_0_ENABLED
 	// AMQP 1.0 management structure
 	struct amqp_data aData;
@@ -85,7 +82,7 @@ int main (int argc, char **argv) {
 		// Print current interface name
 		fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",
 			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.devname : "(any)",
-			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? ifindex : 0);
+			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.ifindex : 0);
 	}
 
 	do {
