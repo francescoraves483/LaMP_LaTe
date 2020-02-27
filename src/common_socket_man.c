@@ -69,10 +69,8 @@ int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct optio
 			if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
 				fprintf(stderr,"Could not retrieve source MAC address.\n");
 				return 0;
-			}
-
-			// Check if the returned MAC is 00:00:00:00:00:00, i.e. MAC_ZERO, as in the case of a tun interface with no MAC
-			if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_ZERO) {
+			} else if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_ZERO) {
+				// The returned MAC is 00:00:00:00:00:00, i.e. MAC_ZERO, as in the case of a tun interface with no MAC
 				fprintf(stderr,"No valid MAC could be retrieved.\nProbably the selected interface is not an AF_PACKET one and has no MAC address.\n"
 					"Please switch to non-raw sockets.\n");
 				return 0;
