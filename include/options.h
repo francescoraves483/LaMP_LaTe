@@ -4,11 +4,12 @@
 #include <stdint.h>
 #include <netinet/in.h>
 #include "rawsock_lamp.h" // In order to import the definition of protocol_t
+#include "math_utils.h"
 
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:NP:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:NP:R:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:NP:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:NP:R:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -55,6 +56,9 @@
 #define NONWLAN_MODE_WIRELESS 0
 #define NONWLAN_MODE_WIRED 1
 #define NONWLAN_MODE_ANY 2
+
+// Default batch size when using a random interval (each batch will have the same interval between packets)
+#define BATCH_SIZE_DEF 10
 
 // Latency types
 typedef enum {
@@ -129,6 +133,10 @@ struct options {
 	char *queueNameTx;
 	char *queueNameRx;
 	#endif
+
+	rand_distribution_t rand_type; // Random -t distribution type, set with '-R'. Default: NON_RAND (i.e. no random interval between packets)
+	double rand_param;
+	uint64_t rand_batch_size;
 };
 
 void options_initialize(struct options *options);

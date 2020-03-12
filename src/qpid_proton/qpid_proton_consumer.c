@@ -447,11 +447,12 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts) {
 	// Report structure inizialization
 	reportStructureInit(&reportData,0,opts->number,opts->latencyType,opts->followup_mode);
 
-	// LaMP ID is randomly generated between 0 and 65535 (the maximum over 16 bits)
+	// Generate an initial session ID, which will not be used by the LaMP session, but which can be used to generate the
+	//  container ID, sender name and receiver name
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
 
 	// This fprintf() terminates the series of call to inform the user about current settings -> using \n\n instead of \n
-	fprintf(stdout,"\t[session LaMP ID] = %" PRIu16 "\n\n",lamp_id_session);
+	fprintf(stdout,"\t[initial session LaMP ID for AMQP] = %" PRIu16 "\n\n",lamp_id_session);
 
 	// Initialize the report structure
 	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);

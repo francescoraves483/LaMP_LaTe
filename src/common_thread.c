@@ -14,6 +14,9 @@ void thread_error_print(const char *name, t_error_types err) {
 		case ERR_SETTIMER:
 			fprintf(stderr,"%s reported an error in timerfd_settime().\n",name);
 			break;
+		case ERR_RANDSETTIMER:
+			fprintf(stderr,"%s reported an error when trying to set again the timer to a random value.\n",name);
+			break;
 		case ERR_SEND_INIT:
 			fprintf(stderr,"%s reported an error in sending the LaMP INIT packet.\n",name);
 			break;

@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <inttypes.h>
 #include "rawsock.h"
+#include "timer_man.h"
 
 #define CSV_EXTENSION_LEN 4 // '.csv' length
 #define CSV_EXTENSION_STR ".csv"
@@ -69,6 +70,28 @@ static void print_long_info(void) {
 		"[options] - Optional client options:\n"
 		"  -n <total number of packets to be sent>: specifies how many packets to send (default: %d).\n"
 		"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: %d ms).\n"
+		"  -R <random interval distrbution string>: allows the user to select a random periodicity, between\n"
+		"\t  the packets which will be sent, instead of using a fixed one (i.e. instead of sending exactly\n"
+		"\t  one packet every '-t' milliseconds). As argument, a string is expected, which should have the\n"
+		"\t  following format: <random distribution type character><distrbution parameter>,<optional batch size>\n"
+		"\t    <random distrbution type character>: can be 'u' for uniform, 'U' for improved uniform (no modulo\n"
+		"\t      bias but may cause an increase processing time when selecting a new random interval), 'e' for\n"
+		"\t      exponential, 'n' for a truncated normal between 1 ms and 2*<-t value>-1 ms\n"
+		"\t    <distribution parameter>: it represents the lower limit to select random numbers from for 'u' and 'U',\n"
+		"\t      the distribution mean for 'e' and the standard deviation for 'n'\n"
+		"\t    <optional batch size>: the optional batch size, separated from the rest of the string, is optional and\n"
+		"\t      it can be used to select how many packets should be sent before selecting a new random interval; if\n"
+		"\t      not specified, 10 packets will be sent with a given random periodicity, before moving to a new random\n"
+		"\t      value of the periodicity itself. Using a value of '1' means that each packet will be sent after a\n"
+		"\t      randomly selected amount of time.\n"
+		"\t  When using -R, the value after -t will also assume a different meaning, in particular:\n"
+		"\t    -the upper limit to select random numbers from, for 'u' and 'U'\n"
+		"\t    -the distribution location parameter (i.e. its \"starting point\"), for 'e'\n"
+		"\t    -the distribution mean, for 'n'\n"
+		"\t  Examples:\n" 
+		"\t  uniform with a lower limit of 10 ms and an upper limit of 100 ms (batch size: default): -t 100 -R u10\n"
+		"\t  uniform, as before, but with a batch size of 20 packets: -t 100 -R u10,20\n"
+		"\t  truncated normal between 1 ms and 399 ms, mean: 200 ms, std dev: 4 ms, batch: 15: -t 200 -R n4,15\n"
 		"  -f <filename, without extension>: print the report to a CSV file other than printing\n"
 		"\t  it on the screen.\n"
 		"\t  The default behaviour will append to an existing file; if the file does not exist,\n" 
@@ -261,6 +284,10 @@ void options_initialize(struct options *options) {
 	options->queueNameTx=NULL;
 	options->queueNameRx=NULL;
 	#endif
+
+	options->rand_type=NON_RAND;
+	options->rand_param=-1;
+	options->rand_batch_size=BATCH_SIZE_DEF;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -564,6 +591,58 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				if(sscanf(optarg,"%" SCNu16, &(options->payloadlen))==EOF) {
 					fprintf(stderr,"Error when reading the payload length after -P.\n");
 					print_short_info_err(options);
+				}
+				break;
+
+			case 'R':
+				{
+
+				char *consistency_check_str=NULL;
+				// If the first character corresponds to a correct random distribution type, parse 'param',
+				//  which will define an additional parameter for each distribution.
+				// If available, parse also the batch size, in which the interval will be kept the same.
+				switch(optarg[0]) {
+					case 'u':
+						if(sscanf(optarg,"%*c%lf,%" SCNu64,&(options->rand_param),&(options->rand_batch_size))<1) {
+							fprintf(stderr,"Error parsing the lower interval limit for the uniform random interval.\n");
+							print_short_info_err(options);
+						}
+						options->rand_type=RAND_PSEUDOUNIFORM;
+						break;
+					case 'U':
+						if(sscanf(optarg,"%*c%lf,%" SCNu64,&(options->rand_param),&(options->rand_batch_size))<1) {
+							fprintf(stderr,"Error parsing the lower interval limit for the uniform (improved) random interval.\n");
+							print_short_info_err(options);
+						}
+						options->rand_type=RAND_UNIFORM;
+						break;
+					case 'e':
+						if(sscanf(optarg,"%*c%lf,%" SCNu64,&(options->rand_param),&(options->rand_batch_size))<1) {
+							fprintf(stderr,"Error parsing the mean for the exponential random interval.\n");
+							print_short_info_err(options);
+						}
+						options->rand_type=RAND_EXPONENTIAL;
+						break;
+					case 'n':
+						if(sscanf(optarg,"%*c%lf,%" SCNu64,&(options->rand_param),&(options->rand_batch_size))<1) {
+							fprintf(stderr,"Error parsing the standard deviation for the normal random interval.\n");
+							print_short_info_err(options);
+						}
+						options->rand_type=RAND_NORMAL;
+						break;
+					default:
+						fprintf(stderr,"Error: the character '%c' you specified after '-R' does not correspond to any random distribution.\n"
+							"Valid options are: 'u'='uniform','U'='uniform (improved, no modulo bias)','e'='exponential','n'='normal'\n",
+							optarg[0]);
+						print_short_info_err(options);
+				}
+				consistency_check_str=timerRandDistribCheckConsistency(options->interval,options->rand_param,options->rand_type);
+
+				if(consistency_check_str!=NULL) {
+					fprintf(stderr,"Error when specifying the '-R' value: %s.\n",consistency_check_str);
+					print_short_info_err(options);
+				}
+				
 				}
 				break;
 
@@ -911,6 +990,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	// Print a warning in case a MAC address was specified with -M in UDP non raw mode, as the MAC is obtained through ARP and this argument will be ignored
 	if(options->protocol==UDP && options->mode_raw==NON_RAW && M_flag==1) {
 		fprintf(stderr,"Warning: a destination MAC address has been specified, but it will be ignored and obtained through ARP.\n");
+	}
+
+	if(options->rand_type!=NON_RAND && options->rand_batch_size>options->number) {
+		fprintf(stderr,"Error: the random interval batch size cannot be greater than the number of packets (i.e. %" PRIu64 ").\n",options->number);
+		print_short_info_err(options);
 	}
 
 	// Get the correct follow-up mode, depending on the current latency type, if F_flag=1 (i.e. if -F was specified)

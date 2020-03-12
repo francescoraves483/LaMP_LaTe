@@ -199,8 +199,9 @@ static void txLoop (arg_struct_udp *args) {
 	// Payload buffer
 	byte_t *payload_buff=NULL;
 
-	// while loop counter
+	// while loop counters
 	unsigned int counter=0;
+	unsigned int batch_counter=0;
 
 	// LaMP packet type
 	uint8_t ctrl=CTRL_PINGLIKE_REQ;
@@ -333,6 +334,15 @@ static void txLoop (arg_struct_udp *args) {
 			// "Clear the event" by performing a read() on a junk variable
 			read(clockFd,&junk,sizeof(junk));
 
+			// Rearm timer with a random timeout if '-R' was specified
+			if(args->opts->rand_type!=NON_RAND && batch_counter==args->opts->rand_batch_size) {
+				if(timerRearmRandom(clockFd,args->opts)<0) {
+					t_tx_error=ERR_RANDSETTIMER;
+					pthread_exit(NULL);
+				}
+				batch_counter=0;
+			}
+
 			// Set UNIDIR_STOP or PINGLIKE_ENDREQ (TLESS for HARDWARE mode) when the last packet has to be transmitted, depending on the current mode_ub ("mode unidirectional/bidirectional")
 			if(counter==args->opts->number-1) {
 				if(args->opts->mode_ub==UNIDIR) {
@@ -405,6 +415,7 @@ static void txLoop (arg_struct_udp *args) {
 
 			// Increase counter
 			counter++;
+			if(args->opts->rand_type!=NON_RAND) batch_counter++;
 		}
 	}
 
@@ -743,12 +754,16 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		"\t[payload length] = %" PRIu16 " B \n"
 		"\t[destination IP address] = %s\n"
 		"\t[latency type] = %s\n"
-		"\t[follow-up] = %s\n",
+		"\t[follow-up] = %s\n"
+		"\t[random interval] = %s\n"
+		"\t[random interval batch] = %" PRIu64 "\n",
 		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+opts->client_timeout : opts->interval+opts->client_timeout,
 		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
 		opts->payloadlen, inet_ntoa(opts->dest_addr_u.destIPaddr),
 		latencyTypePrinter(opts->latencyType),
-		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On");
+		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On",
+		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),
+		opts->rand_type==NON_RAND ? 1 : opts->rand_batch_size);
 
 	// Print current UP
 	if(opts->macUP==UINT8_MAX) {

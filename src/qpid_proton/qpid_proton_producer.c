@@ -107,6 +107,9 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 	lampHeadIncreaseSeq(commonLampHeader);
 	(*counter)++;
 
+	pn_message_clear(aData->message);
+	message_body=pn_message_body(aData->message);
+
 	// Encapsulate LaMP payload only if it is requested
 	if(opts->payloadlen!=0 && payload_buff!=NULL) {
 		lampEncapsulate(aData->lampPacket,commonLampHeader,payload_buff,opts->payloadlen);
@@ -117,9 +120,6 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 		 // The LaMP packet will be only composed by the header
 		aData->lampPacket=(byte_t *)commonLampHeader;
 	}
-
-	pn_message_clear(aData->message);
-	message_body=pn_message_body(aData->message);
 
 	// Insert the LaMP packet inside AMQP
 	pn_data_put_binary(message_body,pn_bytes(aData->lampPacketSize,(const char *)aData->lampPacket));
@@ -194,6 +194,7 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 
 	// while loop counter for sending -n test packets
 	static unsigned int counter=0;
+	static unsigned int batch_counter=1;
 	// Common LaMP header for sending test packets
 	struct lamphdr commonLampHeader;
 	// LaMP payload buffer
@@ -297,12 +298,23 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 						read(clockFd,&junk,sizeof(junk));
 					}
 
+					// Rearm timer with a random timeout if '-R' was specified
+					if(opts->rand_type!=NON_RAND && batch_counter==opts->rand_batch_size) {
+						if(timerRearmRandom(clockFd,opts)<0) {
+							fprintf(stderr,"Error: unable to set random interval with distribution %s\n",enum_to_str_rand_distribution_t(opts->rand_type));
+							return -2;
+						}
+						batch_counter=0;
+					}
+
 					// Continue sending packets. The producerStatus is automatically updated to P_REPORTWAIT when
 					// the last LaMP packet is sent.
 					if(amqpUNIDIRSenderSingleIter(&commonLampHeader,&counter,payload_buff,l_tx,aData,opts)==-1) {
 						fprintf(stderr,"Error: unable to send packet with sequence number %d\n",counter);
 						return -1;
 					}
+
+					batch_counter++;
 				}
 					
 				// Checking the delivery remote state; if PN_ACCEPTED (delivery successfully processed), do nothing,
@@ -443,11 +455,15 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
 		"\t[payload length] = %" PRIu16 " B \n"
 		"\t[broker address] = %s\n"
 		"\t[latency type] = %s\n"
-		"\t[follow-up] = not supported\n",
+		"\t[follow-up] = not supported\n"
+		"\t[random interval] = %s\n"
+		"\t[random interval batch] = %" PRIu64 "\n",
 		opts->interval, aData.proactor_timeout,
 		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
 		opts->payloadlen, opts->dest_addr_u.destAddrStr,
-		latencyTypePrinter(opts->latencyType));
+		latencyTypePrinter(opts->latencyType),
+		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),
+		opts->rand_type==NON_RAND ? 1 : opts->rand_batch_size);
 
 	// LaMP ID is randomly generated between 0 and 65535 (the maximum over 16 bits)
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
