@@ -81,7 +81,7 @@ static void print_long_info(void) {
 		"\t      the distribution mean for 'e' and the standard deviation for 'n'\n"
 		"\t    <optional batch size>: the optional batch size, separated from the rest of the string, is optional and\n"
 		"\t      it can be used to select how many packets should be sent before selecting a new random interval; if\n"
-		"\t      not specified, 10 packets will be sent with a given random periodicity, before moving to a new random\n"
+		"\t      not specified, %d packets will be sent with a given random periodicity, before moving to a new random\n"
 		"\t      value of the periodicity itself. Using a value of '1' means that each packet will be sent after a\n"
 		"\t      randomly selected amount of time.\n"
 		"\t  When using -R, the value after -t will also assume a different meaning, in particular:\n"
@@ -200,6 +200,7 @@ static void print_long_info(void) {
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Basic help
 		CLIENT_DEF_NUMBER, // Optional client options
 		CLIENT_DEF_INTERVAL, // Optional client options
+		BATCH_SIZE_DEF, // Optional client options
 		DEFAULT_LATE_PORT,DEF_CONFIDENCE_INTERVAL_MASK,MIN_TIMEOUT_VAL_C,MIN_TIMEOUT_VAL_C,MIN_TIMEOUT_VAL_C,CLIENT_DEF_TIMEOUT, // Optional client options
 		MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,SERVER_DEF_TIMEOUT, // Optional server options
 		DEFAULT_LATE_PORT, // Optional server options
