@@ -876,6 +876,13 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			print_short_info_err(options);
 		}
 
+		if(options->queueNameRx==NULL || options->queueNameTx==NULL) {
+			fprintf(stderr,"Error: you should specify a queue/topic name to be used with -q.\n"
+				"LaTe will then use two queues for AMQP communication, i.e.\n"
+				"<specified queue name>_tx and <specified queue name>_rx.\n");
+			print_short_info_err(options);
+		}
+
 		// No -e or -I can be specified (print a warning telling that they will be ignored)
 		if(eI_flag==1) {
 			fprintf(stderr,"Warning: -e or -I was specified but it will be ignored.\n");
