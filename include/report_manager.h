@@ -19,6 +19,10 @@
 #define W_MAX_FILE_NUMBER 9999
 #define W_MAX_FILE_NUMBER_DIGITS 4
 
+// Header line when for CSV files containing per-packet data, both when follow-up is enabled and when it is disabled
+#define PERPACKET_FILE_HEADER_NO_FOLLOWUP "Sequence Number,RTT/Latency,Tx_Timestamp_s_us,Error\n"
+#define PERPACKET_FILE_HEADER_FOLLOWUP "Sequence Number,RTT/Latency,Est server processing time,Tx_Timestamp_s_us,Error\n"
+
 // Macro to write the report into a string
 #define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf", \
 									rep1.minLatency,rep1.averageLatency,rep1.maxLatency,rep1.packetCount, \
@@ -55,13 +59,22 @@ typedef struct reportStructure {
 	double confidenceIntervalDev[3];  // us - not transmitted (confidence interval deviation from mean value)
 } reportStructure;
 
+// Structure containing the per-packet data which can be written to a CSV file for each packet
+typedef struct perPackerDataStructure {
+	int followup_on_flag;
+	uint64_t seqNo;
+	int64_t signedTripTime;
+	uint64_t tripTimeProc;
+	struct timeval tx_timestamp;
+} perPackerDataStructure;
+
 void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode);
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber);
 void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
 int openTfile(const char *Tfilename, int followup_on_flag);
-int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,int64_t signedTripTime,uint64_t tripTimeProc);
+int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData);
 void closeTfile(int Tfilepointer);
 
 #endif

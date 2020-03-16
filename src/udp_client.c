@@ -29,13 +29,13 @@ static t_error_types t_rx_error=NO_ERR;
 // When in HARDWARE/SOFTWARE mode, a structure to store the tx timestamps is needed
 // Using timevalStoreList, as defined in timeval_utils.h
 // This structure will be allocated only if HARDWARE/SOFTWARE mode is properly supported 
-timevalStoreList tslist;
+timevalStoreList tslist=NULL_SL;
 
 // The same applies for the following list, used to store temporary trip times (as timestamp differences)
 // when waiting for the server follow-ups, containing an estimate on the time needed
 // to process each client request and send the reply down to the hardware
 // This list is allocated only when the follow-up mode is active
-timevalStoreList triptimelist;
+timevalStoreList triptimelist=NULL_SL;
 
 // Mutex to protect tslist, as defined before
 static pthread_mutex_t tslist_mut=PTHREAD_MUTEX_INITIALIZER;
@@ -472,6 +472,21 @@ static void *rxLoop_t (void *arg) {
 	char ctrlBufSw[CMSG_SPACE(sizeof(struct timeval))];
 	char ctrlBufHw[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
+	// timevalStoreList to store the tx_timestamp values when -W is selected and follow-up mode is active
+	// This may be needed because, in this case, the final per-packet data is printed/saved only upon
+	// reception of the follow-up data packet, while the tx timestamp is instead gathered when the 
+	// normal reply packet is received, which usually happens one iteration before (but it may also be n
+	// iterations before when packets are received out-of-order)
+	// If packets are somehow received out-of-order, a method is needed to associate the right tx timestamp
+	// to each latency measurement when writing to the per-packet data CSV file (-W), which happens only when 
+	// a follow-up data packet with a certain sequence number is received
+	timevalStoreList txstampslist=NULL_SL;
+
+	// Per-packet data structure (to be used when -W is selected)
+	// The followup_on_flag can be already set here
+	perPackerDataStructure perPktData;
+	perPktData.followup_on_flag=args->opts->followup_mode!=FOLLOWUP_OFF;
+
 	// struct sockaddr_in to store the source IP address of the received LaMP packets
 	struct sockaddr_in srcAddr;
 	socklen_t srcAddrLen=sizeof(srcAddr);
@@ -501,6 +516,16 @@ static void *rxLoop_t (void *arg) {
 
 		// As reported into socket.h, these are the "flags on received message"
 		mhdr.msg_flags=NO_FLAGS;
+	}
+
+	// Initialize txstampslist (if follow-up mode is enabled)
+	if(args->opts->Wfilename!=NULL && args->opts->followup_mode!=FOLLOWUP_OFF) {
+		txstampslist=timevalSL_init();
+
+		if(CHECK_SL_NULL(txstampslist)) {
+			fprintf(stderr,"Warning: unable to allocate/initialize memory for saving per-packer tx timestamps to a CSV file.\nThe -W option will be disabled.\n");
+			args->opts->Wfilename=NULL;
+		}
 	}
 
 	// Open CSV file when in "-W" mode (i.e. "write every packet measurement data to CSV file")
@@ -578,6 +603,15 @@ static void *rxLoop_t (void *arg) {
 				tx_timestamp=packet_timestamp;
 			}
 
+			// Store tx_timestamp inside txstampslist, when -W is used together with -F
+			if(Wfiledescriptor>0 && args->opts->followup_mode!=FOLLOWUP_OFF) {
+				if(errorTsFlag==1) {
+					tx_timestamp.tv_sec=0;
+					tx_timestamp.tv_usec=0;
+				}
+				timevalSL_insert(txstampslist,lamp_seq_rx,tx_timestamp);
+			}
+
 			if(errorTsFlag==0) {
 				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
 					fprintf(stderr,"Error: negative latency!\nThis could potentually indicate that SO_TIMESTAMP is not working properly on your system.\n");
@@ -652,7 +686,16 @@ static void *rxLoop_t (void *arg) {
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
 			if(Wfiledescriptor>0) {
-				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,tripTimeProc);
+				perPktData.seqNo=lamp_seq_rx;
+				perPktData.signedTripTime=tripTime;
+				perPktData.tripTimeProc=tripTimeProc;
+
+				if(args->opts->followup_mode!=FOLLOWUP_OFF) {
+					timevalSL_gather(txstampslist,lamp_seq_rx,&tx_timestamp);
+				}
+
+				perPktData.tx_timestamp=tx_timestamp;
+				writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
 			}
 
 			if(continueFlag==0) {
@@ -667,6 +710,10 @@ static void *rxLoop_t (void *arg) {
 
 	if(Wfiledescriptor>0) {
 		closeTfile(Wfiledescriptor);
+	}
+
+	if(!CHECK_SL_NULL(txstampslist)) {
+		timevalSL_free(txstampslist);
 	}
 
 	pthread_exit(NULL);

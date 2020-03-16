@@ -107,6 +107,9 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 	// Return value (i.e. a flag telling whether to continue receiving UNIDIR messages or not)
 	int continueFlag=1;
 
+	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
+	int timevalSub_retval=0;
+
 	// Get size of pending (received) message data
 	rx_size=pn_delivery_pending(d);
 
@@ -148,8 +151,9 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 				gettimeofday(&rx_timestamp,NULL);
 			}
 
-			if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-				fprintf(stderr,"Error: negative latency (%.3f ms - %s) for packet from queue/topic %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+			timevalSub_retval=timevalSub(&tx_timestamp,&rx_timestamp);
+			if(timevalSub_retval) {
+				fprintf(stderr,"Error: negative latency (-%.3f ms - %s) for packet from queue/topic %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
 						(double) (rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec)/1000,latencyTypePrinter(opts->latencyType),
 						pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,(int)rx_size-LAMP_PACKET_OFFSET);
 				tripTime=0;
@@ -167,7 +171,10 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
 			if(aData->Wfiledescriptor>0) {
-				writeToTFile(aData->Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec,0);
+				aData->perPktData.seqNo=lamp_seq_rx;
+				aData->perPktData.signedTripTime=timevalSub_retval==0 ? rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec : -(rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec);
+				aData->perPktData.tx_timestamp=tx_timestamp;
+				writeToTFile(aData->Wfiledescriptor,W_DECIMAL_DIGITS,&(aData->perPktData));
 			}
 		}
 	}
@@ -329,6 +336,11 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 								// No follow-up is supported for AMQP 1.0 testing, but, instead of passing just '0' to openTfile() it can be useful to keep
 								//  the check for a possible follow-up mode, as it may be implemented in some way in the future
 								aData->Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF);
+
+								// Already set some fields in the per-packet data structure, which won't change during the whole test
+								aData->perPktData.followup_on_flag=opts->followup_mode!=FOLLOWUP_OFF;
+								aData->perPktData.tripTimeProc=0;
+
 								if(aData->Wfiledescriptor<0) {
 									fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
 								}

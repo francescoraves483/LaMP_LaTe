@@ -1,6 +1,7 @@
 #ifndef NONRAW_SOCKETMAN_H_INCLUDED
 #define NONRAW_SOCKETMAN_H_INCLUDED
 #include "rawsock.h"
+#include "report_manager.h"
 #include "options.h"
 #include <linux/if_packet.h>
 #include <net/if.h>
@@ -51,6 +52,7 @@ struct amqp_data {
 	char receiverName[RECEIVERNAME_LEN];
 
 	int Wfiledescriptor; // File descriptor to write per-packet data to a CSV file when -W is specified
+	perPackerDataStructure perPktData;	// Per-packet data structure (to be used when -W is selected)
 };
 #endif
 

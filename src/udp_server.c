@@ -317,6 +317,17 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	// File descriptor for -W option (write per-packet data to CSV file)
 	int Wfiledescriptor=-1;
 
+	// Per-packet data structure (to be used when -W is selected)
+	// The followup_on_flag can be already set here, together with tripTimeProc,
+	// as there is no processing time estimation when working in unidirectional mode
+	// (i.e. when working on the only mode in which the server can actually use -W)
+	perPackerDataStructure perPktData;
+	perPktData.followup_on_flag=0;
+	perPktData.tripTimeProc=0;
+
+	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
+	int timevalSub_retval=0;
+
 	ack_report_received=0;
 	followup_mode_session=FOLLOWUP_OFF;
 	t_rx_error=NO_ERR;
@@ -579,8 +590,9 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 					gettimeofday(&rx_timestamp,NULL);
 				}
 
-				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-					fprintf(stderr,"Error: negative latency (%.3f ms - %s) for packet from %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+				timevalSub_retval=timevalSub(&tx_timestamp,&rx_timestamp);
+				if(timevalSub_retval) {
+					fprintf(stderr,"Error: negative latency (-%.3f ms - %s) for packet from %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
 						(double) (rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec)/1000,latencyTypePrinter(opts->latencyType),
 						inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 					tripTime=0;
@@ -598,7 +610,10 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 
 				// When '-W' is specified, write the current measured value to the specified CSV file too (if a file was successfully opened)
 				if(Wfiledescriptor>0) {
-					writeToTFile(Wfiledescriptor,opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec,0);
+					perPktData.seqNo=lamp_seq_rx;
+					perPktData.signedTripTime=timevalSub_retval==0 ? rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec : -(rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec);
+					perPktData.tx_timestamp=tx_timestamp;
+					writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
 				}
 			break;
 

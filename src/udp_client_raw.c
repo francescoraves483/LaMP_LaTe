@@ -535,6 +535,15 @@ static void *rxLoop_t (void *arg) {
 	char ctrlBufKrt[CMSG_SPACE(sizeof(struct timeval))];
 	char ctrlBufHwSw[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
+	// Per-packet data structure (to be used when -W is selected)
+	// The followup_on_flag can be already set here
+	perPackerDataStructure perPktData;
+	perPktData.followup_on_flag=args->opts->followup_mode!=FOLLOWUP_OFF;
+
+	// timevalStoreList to store the tx_timestamp values when -W is selected and follow-up mode is active
+	// A better explanation of this can be found in the comments inside udp_client.c
+	timevalStoreList txstampslist=NULL_SL;
+
 	int fu_flag=1; // Flag set to 0 when a follow-up is received after an ENDREPLY or ENDREPLY_TLESS (SOFTWARE or HARDWARE latencyType only, fixed to 0 for other types)
 	int continueFlag=1; // Flag set to 0 when an ENDREPLY or ENDREPLY_TLESS is received
 	int errorTsFlag=0; // Flag set to 1 when an error occurred in retrieving a timestamp (i.e. if no latency data can be reported for the current packet)
@@ -574,6 +583,16 @@ static void *rxLoop_t (void *arg) {
 
 		// As reported into socket.h, these are the "flags on received message"
 		mhdr.msg_flags=NO_FLAGS;
+	}
+
+	// Initialize txstampslist (if follow-up mode is enabled)
+	if(args->opts->Wfilename!=NULL && args->opts->followup_mode!=FOLLOWUP_OFF) {
+		txstampslist=timevalSL_init();
+
+		if(CHECK_SL_NULL(txstampslist)) {
+			fprintf(stderr,"Warning: unable to allocate/initialize memory for saving per-packer tx timestamps to a CSV file.\nThe -W option will be disabled.\n");
+			args->opts->Wfilename=NULL;
+		}
 	}
 
 	// Open CSV file when in "-W" mode (i.e. "write every packet measurement data to CSV file")
@@ -679,6 +698,15 @@ static void *rxLoop_t (void *arg) {
 				tx_timestamp=packet_timestamp;
 			}
 
+			// Store tx_timestamp inside txstampslist, when -W is used together with -F
+			if(Wfiledescriptor>0 && args->opts->followup_mode!=FOLLOWUP_OFF) {
+				if(errorTsFlag==1) {
+					tx_timestamp.tv_sec=0;
+					tx_timestamp.tv_usec=0;
+				}
+				timevalSL_insert(txstampslist,lamp_seq_rx,tx_timestamp);
+			}
+
 			if(errorTsFlag==0) {
 				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
 					fprintf(stderr,"Warning: negative latency!\nThis could potentually indicate that SO_TIMESTAMP is not working properly on your system.\n");
@@ -757,7 +785,16 @@ static void *rxLoop_t (void *arg) {
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
 			if(Wfiledescriptor>0) {
-				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,tripTimeProc);
+				perPktData.seqNo=lamp_seq_rx;
+				perPktData.signedTripTime=tripTime;
+				perPktData.tripTimeProc=tripTimeProc;
+
+				if(args->opts->followup_mode!=FOLLOWUP_OFF) {
+					timevalSL_gather(txstampslist,lamp_seq_rx,&tx_timestamp);
+				}
+
+				perPktData.tx_timestamp=tx_timestamp;
+				writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
 			}
 
 			if(continueFlag==0) {
@@ -772,6 +809,10 @@ static void *rxLoop_t (void *arg) {
 
 	// Free source MAC address memory area
 	freeMacAddrT(srcmacaddr_pkt);
+
+	if(!CHECK_SL_NULL(txstampslist)) {
+		timevalSL_free(txstampslist);
+	}
 
 	pthread_exit(NULL);
 }
