@@ -288,6 +288,7 @@ void options_initialize(struct options *options) {
 
 	options->rand_type=NON_RAND;
 	options->rand_param=-1;
+
 	options->rand_batch_size=BATCH_SIZE_DEF;
 }
 
@@ -918,6 +919,13 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 	}
 	#endif
+
+	// If rand type is NON_RAND, set the batch size equal to the number specified with -n
+	// This is done only for saving this value in the CSV file/print it when a client stats when no random distribution is selected
+	// It should have no other practical implications as NON_RAND ignores any random periodicity batch size
+	if(options->rand_type==NON_RAND) {
+		options->rand_batch_size=options->number;
+	}
 
 	if(options->interval==0) {
 		if(options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) {

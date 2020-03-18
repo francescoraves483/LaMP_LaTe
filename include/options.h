@@ -135,8 +135,8 @@ struct options {
 	#endif
 
 	rand_distribution_t rand_type; // Random -t distribution type, set with '-R'. Default: NON_RAND (i.e. no random interval between packets)
-	double rand_param;
-	uint64_t rand_batch_size;
+	double rand_param; // Its meaning depends on 'rand_type'
+	uint64_t rand_batch_size; // Defaults to BATCH_SIZE_DEF when rand_type!=NON_RAND or it is set to 'number' and practically not used when rand_type==NON_RAND
 };
 
 void options_initialize(struct options *options);

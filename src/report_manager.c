@@ -286,7 +286,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 		if(opts->overwrite || !fileAlreadyExists) {
 			// Recreate CSV first line
-			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-s,LatencyType,FollowUp,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,ErrorsCount,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
+			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-ms,Interval-type,Interval-Distrib-Param,Interval-Distrib-Batch-Size,LatencyType,FollowUp,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,ErrorsCount,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
 		}
 
 		// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
@@ -318,7 +318,10 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 		dprintf(csvfp,"%d," 		// macUP
 			"%" PRIu16 ","			// payloadLen
 			"%" PRIu64 ","			// total number of packets requested
-			"%.3f,"					// interval between packets (in s)
+			"%.3f,"					// interval between packets (in ms)
+			"%s,"					// (random) interval type
+			"%lf,"					// random interval param (if available, if not, it is equal to -1)
+			"%" PRIu64 ","			// random interval batch size (if available, if not using random intervals, it is forced to be always = total number of packets)
 			"%s,"					// latency type (-L)
 			"%s,"					// follow-up (-F)
 			"%.3f,"					// minLatency
@@ -331,7 +334,10 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
 			opts->number,																											// total number of packets requested
-			((double) opts->interval)/1000,																							// interval between packets (in s)
+			(double) opts->interval,																								// interval between packets (in ms)
+			opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),						// (random) interval type
+			opts->rand_param,																										// random interval param (if available, if not, it is equal to -1)
+			opts->rand_batch_size,																									// random interval batch size (if available, if not using random intervals, it is forced to be always = total number of packets)
 			latencyTypePrinter(report->latencyType),																				// latency type (-L)
 			report->followupMode!=FOLLOWUP_OFF ? "On" : "Off",																		// follow-up (-F)					
 			report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,												// minLatency

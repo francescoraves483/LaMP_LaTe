@@ -954,7 +954,7 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		latencyTypePrinter(opts->latencyType),
 		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On",
 		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),
-		opts->rand_type==NON_RAND ? 1 : opts->rand_batch_size);
+		opts->rand_batch_size);
 
 	// Print current UP
 	if(opts->macUP==UINT8_MAX) {

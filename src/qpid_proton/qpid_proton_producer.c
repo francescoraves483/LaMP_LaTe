@@ -463,7 +463,7 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
 		opts->payloadlen, opts->dest_addr_u.destAddrStr,
 		latencyTypePrinter(opts->latencyType),
 		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),
-		opts->rand_type==NON_RAND ? 1 : opts->rand_batch_size);
+		opts->rand_batch_size);
 
 	// LaMP ID is randomly generated between 0 and 65535 (the maximum over 16 bits)
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
