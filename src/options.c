@@ -116,9 +116,9 @@ static void print_long_info(void) {
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
-		"  -S: instead of automatically looking for available interfaces, use a specific interface which name is\n"
-		"\t  specified after this option. The suggestion is to rely on this option only when an interface is not\n"
-		"\t  listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
+		"  -S <interface name>: instead of automatically looking for available interfaces, use a specific interface\n"
+		"\t  which name is specified after this option. The suggestion is to rely on this option only when an interface\n"
+		"\t  is not listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
 		#if AMQP_1_0_ENABLED
 		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 		#endif
@@ -167,9 +167,9 @@ static void print_long_info(void) {
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
-		"  -S: instead of automatically looking for available interfaces, use a specific interface which name is\n"
-		"\t  specified after this option. The suggestion is to rely on this option only when an interface is not\n"
-		"\t  listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
+		"  -S <interface name>: instead of automatically looking for available interfaces, use a specific interface\n"
+		"\t  which name is specified after this option. The suggestion is to rely on this option only when an interface\n"
+		"\t  is not listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
 		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
 		"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
 		"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n"
@@ -957,7 +957,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	#endif
 
 	// If rand type is NON_RAND, set the batch size equal to the number specified with -n
-	// This is done only for saving this value in the CSV file/print it when a client stats when no random distribution is selected
+	// This is done only for saving this value in the CSV file/print it when a client starts when no random distribution is selected
 	// It should have no other practical implications as NON_RAND ignores any random periodicity batch size
 	if(options->rand_type==NON_RAND) {
 		options->rand_batch_size=options->number;
