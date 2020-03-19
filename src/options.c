@@ -116,6 +116,9 @@ static void print_long_info(void) {
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
+		"  -S: instead of automatically looking for available interfaces, use a specific interface which name is\n"
+		"\t  specified after this option. The suggestion is to rely on this option only when an interface is not\n"
+		"\t  listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
 		#if AMQP_1_0_ENABLED
 		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 		#endif
@@ -164,6 +167,9 @@ static void print_long_info(void) {
 		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
 		"\t  look for available wireless interfaces and return an error if none are found.\n"
 		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
+		"  -S: instead of automatically looking for available interfaces, use a specific interface which name is\n"
+		"\t  specified after this option. The suggestion is to rely on this option only when an interface is not\n"
+		"\t  listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
 		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
 		"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
 		"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n"
@@ -260,6 +266,8 @@ void options_initialize(struct options *options) {
 
 	options->filename=NULL;
 	options->overwrite=0;
+
+	options->opt_devname=NULL;
 
 	options->dmode=0;
 
@@ -645,6 +653,34 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					print_short_info_err(options);
 				}
 				
+				}
+				break;
+
+			case 'S':
+				{
+				int opt_devnameLen=0;
+
+				if(options->nonwlan_mode!=NONWLAN_MODE_WIRELESS) {
+					fprintf(stderr,"Error when selecting -S: -e/-I or -N was already specified.\nPlease specify only one option between -e/-I, -N or -S.\n");
+					print_short_info_err(options);
+				}
+
+				opt_devnameLen=strlen(optarg)+1;
+				if(opt_devnameLen>1) {
+					options->opt_devname=malloc(opt_devnameLen*sizeof(char));
+					if(!options->opt_devname) {
+						fprintf(stderr,"Error in parsing the interface name specified with -S: cannot allocate memory.\n");
+						fprintf(stderr,"If this error persists, try using -e or -N instead.\n");
+						print_short_info_err(options);
+					}
+					strncpy(options->opt_devname,optarg,opt_devnameLen);
+				} else {
+					fprintf(stderr,"Error in parsing the interface name specified with -S: null string length.\n");
+					print_short_info_err(options);
+				}
+
+				options->nonwlan_mode=NONWLAN_MODE_FORCED_NAME;
+
 				}
 				break;
 
@@ -1045,6 +1081,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 void options_free(struct options *options) {
 	if(options->filename) {
 		free(options->filename);
+	}
+
+	if(options->opt_devname) {
+		free(options->opt_devname);
 	}
 
 	if(options->Wfilename) {

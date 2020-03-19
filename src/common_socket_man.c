@@ -1,4 +1,5 @@
 #include "common_socket_man.h"
+#include <linux/if.h>
 #include <linux/net_tstamp.h>
 #include <linux/sockios.h>
 #include <linux/ethtool.h>
@@ -24,7 +25,8 @@ int socketCreator(protocol_t protocol) {
 int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct options *opts,struct src_addrs *addressesptr) {
 	// wlanLookup index and return value
 	int wlanLookupIdx=0;
-	int ret_wlanl_val;
+
+	int sds_retval=1;
 
 	// Only UDP is supported as of now
 	if(protocol!=UDP) {
@@ -48,48 +50,107 @@ int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct optio
 	}
 
 	// Look for available wireless/non-wireless interfaces, only if the user did not want to bind to all local interfaces (using option -N)
-	if(opts->nonwlan_mode!=NONWLAN_MODE_ANY) {
-		// Null the devname field in sData
-		memset(sData->devname,0,IFNAMSIZ*sizeof(char));
+	switch(opts->nonwlan_mode) {
+		case NONWLAN_MODE_WIRELESS:
+		case NONWLAN_MODE_WIRED:
+			{
+			rawsockerr_t ret_wlanl_val;
 
-		ret_wlanl_val=wlanLookup(sData->devname,&(sData->ifindex),addressesptr->srcmacaddr,&(addressesptr->srcIPaddr),wlanLookupIdx,opts->nonwlan_mode==NONWLAN_MODE_WIRELESS ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
-		if(ret_wlanl_val<=0) {
-			rs_printerror(stderr,ret_wlanl_val);
-			return 0;
-		}
+			// Null the devname field in sData
+			memset(sData->devname,0,IFNAMSIZ*sizeof(char));
 
-		if(opts->mode_raw==RAW) {
-			if(opts->dest_addr_u.destIPaddr.s_addr==addressesptr->srcIPaddr.s_addr) {
-				fprintf(stderr,"Error: you cannot test yourself in raw mode.\n"
-					"Use non raw sockets instead.\n");
+			ret_wlanl_val=wlanLookup(sData->devname,&(sData->ifindex),addressesptr->srcmacaddr,&(addressesptr->srcIPaddr),wlanLookupIdx,opts->nonwlan_mode==NONWLAN_MODE_WIRELESS ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
+			if(ret_wlanl_val<=0) {
+				rs_printerror(stderr,ret_wlanl_val);
 				return 0;
 			}
 
-			// Check if wlanLookup() was able to properly write the source MAC address
-			if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
-				fprintf(stderr,"Could not retrieve source MAC address.\n");
-				return 0;
-			} else if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_ZERO) {
-				// The returned MAC is 00:00:00:00:00:00, i.e. MAC_ZERO, as in the case of a tun interface with no MAC
-				fprintf(stderr,"No valid MAC could be retrieved.\nProbably the selected interface is not an AF_PACKET one and has no MAC address.\n"
-					"Please switch to non-raw sockets.\n");
+			if(opts->mode_raw==RAW) {
+				if(opts->dest_addr_u.destIPaddr.s_addr==addressesptr->srcIPaddr.s_addr) {
+					fprintf(stderr,"Error: you cannot test yourself in raw mode.\n"
+						"Use non raw sockets instead.\n");
+					return 0;
+				}
+
+				// Check if wlanLookup() was able to properly write the source MAC address
+				if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
+					fprintf(stderr,"Could not retrieve source MAC address.\n");
+					return 0;
+				} else if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_ZERO) {
+					// The returned MAC is 00:00:00:00:00:00, i.e. MAC_ZERO, as in the case of a tun interface with no MAC
+					fprintf(stderr,"No valid MAC could be retrieved.\nProbably the selected interface is not an AF_PACKET one and has no MAC address.\n"
+						"Please switch to non-raw sockets.\n");
+					return 0;
+				}
+			}
+
+			// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
+			if(opts->mode_cs==LOOPBACK_CLIENT || opts->mode_cs==LOOPBACK_SERVER) {
+				options_set_destIPaddr(opts,addressesptr->srcIPaddr);
+			}
+
+			}
+			break;
+
+		case NONWLAN_MODE_ANY:
+			if(opts->mode_raw==RAW) {
+				fprintf(stderr,"Error: you requested to bind to all local interfaces, but raw sockets require\n"
+					"a specific interface to be defined.\n");
 				return 0;
 			}
-		}
 
-		// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
-		if(opts->mode_cs==LOOPBACK_CLIENT || opts->mode_cs==LOOPBACK_SERVER) {
-			options_set_destIPaddr(opts,addressesptr->srcIPaddr);
-		}
-	} else {
-		if(opts->mode_raw==RAW) {
-			fprintf(stderr,"Error: you requested to bind to all local interfaces, but raw sockets require\n"
-				"a specific interface to be defined.\n");
-			return 0;
-		}
+			break;
+
+		case NONWLAN_MODE_FORCED_NAME:
+			{
+			// If a better solution, which does not require opening any dummy socket to get the IP address, is found, these
+			// variables should probably be removed
+			int dummysFd;
+			struct ifreq ifreq;
+
+			// Check if the specified interface is available and, if yes, get its interface index and IP address
+			// if_nametoindex() is used (defined in <net/if.h>)
+			sData->ifindex=if_nametoindex(opts->opt_devname);
+
+			if(!sData->ifindex) {
+				fprintf(stderr,"Error: cannot find the specified interface: '%s'.\n",opts->opt_devname);
+				return 0;
+			}
+
+			// If everything is ok, copy opts->opt_devname into sData->devname
+			strncpy(sData->devname,opts->opt_devname,IFNAMSIZ);
+
+			// If a better solution, which does not require opening any dummy socket to get the IP address, is found, this part
+			// should be updated accordingly
+			dummysFd=socket(AF_INET,SOCK_DGRAM,0);
+
+			strncpy(ifreq.ifr_name,sData->devname,IFNAMSIZ);
+			ifreq.ifr_addr.sa_family=AF_INET;
+			if(ioctl(dummysFd,SIOCGIFADDR,&ifreq)!=-1) {
+				addressesptr->srcIPaddr=((struct sockaddr_in*)&ifreq.ifr_addr)->sin_addr;
+
+				if(opts->verboseFlag) {
+					fprintf(stdout,"[INFO] Interface '%s' has IP address %s.\n",opts->opt_devname,inet_ntoa(addressesptr->srcIPaddr));
+				}
+			} else {
+				fprintf(stderr,"Error: Interface '%s' exists, but no IP address could be found for it.\n",opts->opt_devname);
+				sds_retval=0;
+			}
+
+			close(dummysFd);
+
+			}
+
+			break;
+
+		default:
+			fprintf(stderr,"Error: a programming error has occurred: unknown opts->nonwlan_mode in socketDataSetup().\n"
+				"Please report this bug to the authors of the program.\n");
+			sds_retval=0;
+			break;
 	}
 
-	return 1;
+	return sds_retval;
 }
 
 // socketOpen will automalically close the socket in case of error

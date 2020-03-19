@@ -7,9 +7,9 @@
 #include "math_utils.h"
 
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:NP:R:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:NP:R:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -56,6 +56,7 @@
 #define NONWLAN_MODE_WIRELESS 0
 #define NONWLAN_MODE_WIRED 1
 #define NONWLAN_MODE_ANY 2
+#define NONWLAN_MODE_FORCED_NAME 3
 
 // Default batch size when using a random interval (each batch will have the same interval between packets)
 #define BATCH_SIZE_DEF 10
@@ -109,6 +110,7 @@ struct options {
 	int macUP;
 	char *filename; // Filename for the -f mode
 	uint8_t overwrite; // In '-f' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not append to existing file), otherwise it will be = 0 (default = 0)
+	char *opt_devname; // Interface name for the -S mode
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (KRT, gettimeofday()+ancillary data), 'h' (hardware timestamps when supported)
 	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise, = 2 if binding to any local interface (default: 0)
