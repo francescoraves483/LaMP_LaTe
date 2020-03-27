@@ -21,6 +21,16 @@ Additional targets are also defined; in particular:
 - `compileAPU`, as we also used **LaTe** to perform wireless latency measurements on [PC Engines APU1D embedded boards](https://pcengines.ch/apu1d.htm), running [OpenWrt](https://github.com/francescoraves483/OpenWrt-V2X), we defined an additional target to cross-compile LaTe for the boards. This command should work when targeting any **x86_64** embedded board running **OpenWrt**, after the toolchain has been properly set up (tested with OpenWrt 18.06.1). If you want to cross-compile LaTe for other Linux-based platforms, you will need to change the value of **CC_EMBEDDED** inside the Makefile with the compiler you need to use.
 - `compileAPUdebug`, as before, but with the `-g` flag to generate debug informations for `gdb`.
 
+The additional **Makefile_termux** makefile can be used when building the LaTe version supporting AMQP on a non-rooted **Android** device, using Termux.
+When installing Qpid Proton, you can choose to install it inside `/data/data/com.termux/files/home/libs`, which will make root privileges unnecessary when running `make install`.
+This makefile, when running `make -f Makefile_termux compilePCfull` will look for Qpid Proton inside `/data/data/com.termux/files/home/libs`, allowing you to compile also the full version of LaTe.
+In this particular case, before launching LaTe, after compiling it, remember to add the new library path to `LD_LIBRARY_PATH`:
+```
+export LD_LIBRARY_PATH=/data/data/com.termux/files/home/libs
+```
+
+Please note that in order to compile Qpid Proton on Android, you may need to manually patch the library. For your conveniency, an already patched QPid Proton C library (version 0.30.0) is available [here](https://github.com/francescoraves483/qpid-proton).
+
 **LaTe** has been extensively tested on Linux kernel versions 4.14.63, 4.15.0 and 5.0.0 and it is currently using the [**Rawsock library, version 0.3.3**](https://github.com/francescoraves483/Rawsock_lib).
 
 **How to compile**

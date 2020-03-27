@@ -1,0 +1,92 @@
+EXECNAME=LaTe
+EXECNAME_FULL=LaTe-full
+
+CC_EMBEDDED=x86_64-openwrt-linux-musl-gcc
+
+SRC_DIR=src
+OBJ_DIR=obj
+OBJ_FULL_DIR=obj-full
+
+SRC_RAWSOCK_LIB_DIR=Rawsock_lib/Rawsock_lib
+OBJ_RAWSOCK_LIB_DIR=Rawsock_lib/Rawsock_lib
+
+SRC_QPID_MODULE_DIR=src/qpid_proton
+OBJ_QPID_MODULE_DIR=obj-full/qpid_proton
+
+SRC=$(wildcard $(SRC_DIR)/*.c)
+SRC_RAWSOCK_LIB=$(wildcard $(SRC_RAWSOCK_LIB_DIR)/*.c)
+SRC_QPID_MODULE=$(wildcard $(SRC_QPID_MODULE_DIR)/*.c)
+
+OBJ=$(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+OBJ_RAWSOCK_LIB=$(SRC_RAWSOCK_LIB:$(SRC_RAWSOCK_LIB_DIR)/%.c=$(OBJ_RAWSOCK_LIB_DIR)/%.o)
+
+OBJ_FULL=$(SRC:$(SRC_DIR)/%.c=$(OBJ_FULL_DIR)/%.o)
+OBJ_QPID_MODULE=$(SRC_QPID_MODULE:$(SRC_QPID_MODULE_DIR)/%.c=$(OBJ_QPID_MODULE_DIR)/%.o)
+
+OBJ_CC=$(OBJ)
+OBJ_CC+=$(OBJ_RAWSOCK_LIB)
+
+OBJ_CC_FULL=$(OBJ_FULL)
+OBJ_CC_FULL+=$(OBJ_RAWSOCK_LIB)
+OBJ_CC_FULL+=$(OBJ_QPID_MODULE)
+
+CFLAGS += -Wall -O2 -Iinclude -IRawsock_lib/Rawsock_lib
+LDLIBS += -lpthread -lm
+
+.PHONY: all clean
+
+all: compilePC
+
+compilePC: CC = gcc
+compileAPU: CC = $(CC_EMBEDDED)
+	
+compilePCdebug: CFLAGS += -g
+compilePCdebug: compilePC
+
+compileAPUdebug: CFLAGS += -g
+compileAPUdebug: compileAPU
+
+compilePCfull: LDLIBS += -lqpid-proton -L/data/data/com.termux/files/home/libs/lib64
+compilePCfull: CFLAGS += -DAMQP_1_0_ENABLED -Iinclude/qpid_proton -I/data/data/com.termux/files/home/libs/include
+
+compilePCfulldebug: CFLAGS += -g
+compilePCfulldebug: compilePCfull
+
+compilePC compileAPU compilePCdebug compileAPUdebug: $(EXECNAME)
+
+compilePCfull compilePCfulldebug: $(EXECNAME_FULL)
+
+# Standard targets
+$(EXECNAME): $(OBJ_CC)
+	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@ mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_RAWSOCK_LIB_DIR)/%.o: $(SRC_RAWSOCK_LIB_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Full targets
+$(EXECNAME_FULL): $(OBJ_CC_FULL)
+	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	-mv $(EXECNAME_FULL) $(EXECNAME)
+
+$(OBJ_FULL_DIR)/%.o: $(SRC_DIR)/%.c
+	@ mkdir -p $(OBJ_FULL_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_RAWSOCK_LIB_DIR)/%.o: $(SRC_RAWSOCK_LIB_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_QPID_MODULE_DIR)/%.o: $(SRC_QPID_MODULE_DIR)/%.c
+	@ mkdir -p $(OBJ_QPID_MODULE_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+clean:
+	$(RM) $(OBJ_DIR)/*.o $(OBJ_FULL_DIR)/*.o $(OBJ_RAWSOCK_LIB_DIR)/*.o $(OBJ_QPID_MODULE_DIR)/*.o
+	-rm -rf $(OBJ_DIR)
+	-rm -rf $(OBJ_FULL_DIR)
+
+fullclean: clean
+	$(RM) $(EXECNAME)
