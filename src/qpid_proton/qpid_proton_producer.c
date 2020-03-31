@@ -22,7 +22,7 @@
 static producer_status_t producerStatus=P_JUSTSTARTED;
 static uint16_t lamp_id_session;
 
-static int allocatePacketBuffers(struct amqp_data *aData,struct options *opts,byte_t *payload_buff) {
+static int allocatePacketBuffers(struct amqp_data *aData,struct options *opts,byte_t **payload_buff) {
 	// Allocating packet buffers (with and without payload)
 	if(opts->payloadlen!=0) {
 		aData->lampPacket=malloc(sizeof(struct lamphdr)+opts->payloadlen);
@@ -38,16 +38,16 @@ static int allocatePacketBuffers(struct amqp_data *aData,struct options *opts,by
 
 	// Allocate and fill the LaMP payload buffer (if a certain payload size was requested)
 	if(opts->payloadlen!=0) {
-		payload_buff=malloc((opts->payloadlen)*sizeof(byte_t));
+		*payload_buff=malloc((opts->payloadlen)*sizeof(byte_t));
 
-		if(!payload_buff) {
+		if(!(*payload_buff)) {
 			free(aData->lampPacket);
 
 			return -1;
 		}
 
 		for(int i=0;i<opts->payloadlen;i++) {
-			payload_buff[i]=(byte_t) (i & 15);
+			(*payload_buff)[i]=(byte_t) (i & 15);
 		}
 	}
 
@@ -140,20 +140,24 @@ static int amqpReportACKreceiver(lamptype_t type,reportStructure *reportDataPtr,
 	size_t rx_size;
 	int isRightMsgReceived=0;
 
-	// AMQP message buffer (size: maximum LaMP packet length + LAMP_PACKET_OFFSET bytes of AMQP header)
-	char amqp_message_buf[MAX_LAMP_LEN+LAMP_PACKET_OFFSET];
+	// AMQP message buffer (size: maximum LaMP packet length + ADDITIONAL_AMQP_HEADER_MAX_SIZE)
+	char amqp_message_buf[MAX_LAMP_LEN+ADDITIONAL_AMQP_HEADER_MAX_SIZE];
 
-	// Pointer to LaMP packet buffer with size = maximum LaMP packet length
-	byte_t *lampPacket=(byte_t *) &(amqp_message_buf[0])+LAMP_PACKET_OFFSET;
+	// Structure containing the LaMP packet extracted from the AMQP message
+	lampPacket_bytes_t lampPacketBytes;
 
 	// Pointer to the LaMP header, inside the packet buffer
-	struct lamphdr *lampHeaderPtr=(struct lamphdr *) lampPacket;
+	struct lamphdr *lampHeaderPtr;
 	// Pointer to the payload, inside the packet buffer
-	byte_t *lampPayloadPtr=lampPacket+LAMP_HDR_SIZE();
+	//byte_t *lampPayloadPtr=lampPacket+LAMP_HDR_SIZE();
+	byte_t *lampPayloadPtr;
 
 	// LaMP relevant fields
 	lamptype_t lamp_type_rx;
 	uint16_t lamp_id_rx;
+
+	// Received AMQP data type
+	pn_type_t amqp_type;
 
 	// Get size of pending (received) message data
 	rx_size=pn_delivery_pending(d);
@@ -165,8 +169,18 @@ static int amqpReportACKreceiver(lamptype_t type,reportStructure *reportDataPtr,
 		pn_delivery_update(d,PN_ACCEPTED);
 	    pn_delivery_settle(d);
 
+	   	// Extract the LaMP packet from the AMQP message
+	    amqp_type=lampPacketDecoder(amqp_message_buf,rx_size,&lampPacketBytes);
+
+	    if(amqp_type!=PN_BINARY) {
+	    	return 0;
+	    }
+
+	    lampHeaderPtr=(struct lamphdr *)lampPacketBytes.lampPacket.start;
+	    lampPayloadPtr=((byte_t *)lampPacketBytes.lampPacket.start)+LAMP_HDR_SIZE();
+
 		if(IS_LAMP(lampHeaderPtr->reserved,lampHeaderPtr->ctrl)) {
-			lampHeadGetData(lampPacket,&lamp_type_rx,&lamp_id_rx,NULL,NULL,NULL,NULL);
+			lampHeadGetData((byte_t *)lampPacketBytes.lampPacket.start,&lamp_type_rx,&lamp_id_rx,NULL,NULL,NULL,NULL);
 
 			if(lamp_type_rx==type && lamp_id_rx==lamp_id_session) {
 				isRightMsgReceived=1;
@@ -197,8 +211,8 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 	static unsigned int batch_counter=1;
 	// Common LaMP header for sending test packets
 	struct lamphdr commonLampHeader;
-	// LaMP payload buffer
-	byte_t *payload_buff=NULL;
+	// LaMP payload buffer (which is equal for each time the producerEventHandler() is called)
+	static byte_t *payload_buff=NULL;
 
 	// Timer and poll() variables
 	struct pollfd timerMon;
@@ -357,7 +371,7 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 						// except for sequence number and, for the last one, type
 						lampHeadPopulate(&commonLampHeader,opts->number==1 ? CTRL_UNIDIR_STOP : CTRL_UNIDIR_CONTINUE,lamp_id_session,0);
 
-						if(allocatePacketBuffers(aData,opts,payload_buff)==-1) {
+						if(allocatePacketBuffers(aData,opts,&payload_buff)==-1) {
 							fprintf(stderr,"Error: cannot allocate memory.\n");
 							return -1;
 						};

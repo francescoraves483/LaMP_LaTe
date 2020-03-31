@@ -33,3 +33,30 @@ int qpid_condition_check_and_close_connection(pn_event_t *event,pn_condition_t *
 
 	return return_value;
 }
+
+pn_type_t lampPacketDecoder(char *amqp_message_buf,size_t rx_size,lampPacket_bytes_t *lampPacket) {
+	// AMQP message object and data structure decoded from the AMQP message
+	pn_message_t *amqp_msg=pn_message();
+	pn_data_t* amqp_msg_data;
+	pn_type_t amqp_data_type;
+
+	if(amqp_msg==NULL) {
+		return PN_INVALID;
+	}
+
+	lampPacket->msg_ptr=amqp_msg;
+
+	// Extract data from the message
+	pn_message_decode(amqp_msg,amqp_message_buf,rx_size);
+	amqp_msg_data=pn_message_body(amqp_msg);
+	pn_data_next(amqp_msg_data);
+
+	// If non-binary data is received, this is for sure a packet non belonging to our test, as LaTe is using only binary data
+	// Thus, we shall call pn_data_get_binary() only when binary data is correctly received
+	amqp_data_type=pn_data_type(amqp_msg_data);
+	if(amqp_data_type==PN_BINARY) {
+		lampPacket->lampPacket=pn_data_get_binary(amqp_msg_data);
+	}
+
+	return amqp_data_type;
+}

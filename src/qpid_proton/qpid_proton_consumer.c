@@ -22,6 +22,10 @@ static consumer_status_t consumerStatus;
 static uint16_t lamp_id_session;
 static modeub_t mode_session;
 
+static void lampPacketBytesFree(lampPacket_bytes_t *lampPacket) {
+	pn_message_free(lampPacket->msg_ptr);
+}
+
 static int amqpACKReportSender(lamptype_t type,pn_link_t *lnk,struct amqp_data *aData,struct options *opts,reportStructure *reportPtr) {
 	pn_data_t* message_body;
 
@@ -86,13 +90,13 @@ static int amqpACKReportSender(lamptype_t type,pn_link_t *lnk,struct amqp_data *
 
 static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *aData,struct options *opts, reportStructure *reportPtr) {
 	size_t rx_size;
-	// AMQP message buffer (size: maximum LaMP packet length + LAMP_PACKET_OFFSET bytes of AMQP header)
-	char amqp_message_buf[MAX_LAMP_LEN+LAMP_PACKET_OFFSET];
+	// AMQP message buffer (size: maximum LaMP packet length + ADDITIONAL_AMQP_HEADER_MAX_SIZE)
+	char amqp_message_buf[MAX_LAMP_LEN+ADDITIONAL_AMQP_HEADER_MAX_SIZE];
 
-	// Pointer to LaMP packet buffer with size = maximum LaMP packet length
-	byte_t *lampPacket=(byte_t *) &(amqp_message_buf[0])+LAMP_PACKET_OFFSET;
+	// Structure containing the LaMP packet extracted from the AMQP message
+	lampPacket_bytes_t lampPacketBytes;
 	// Pointer to the LaMP header, inside the packet buffer
-	struct lamphdr *lampHeaderPtr=(struct lamphdr *) lampPacket;
+	struct lamphdr *lampHeaderPtr;
 
 	// RX and TX timestamp containers
 	struct timeval rx_timestamp={.tv_sec=0,.tv_usec=0}, tx_timestamp={.tv_sec=0,.tv_usec=0};
@@ -110,11 +114,14 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
 	int timevalSub_retval=0;
 
+	// Received AMQP data type
+	pn_type_t amqp_type;
+
 	// Get size of pending (received) message data
 	rx_size=pn_delivery_pending(d);
 
 	if(opts->verboseFlag) {
-		fprintf(stdout,"[INFO] Received LaMP message size=%zu\n",rx_size-LAMP_PACKET_OFFSET);
+		fprintf(stdout,"[INFO] Received AMQP message size=%zu\n",rx_size);
 	}
 
 	pn_link_recv(lnk,amqp_message_buf,rx_size);
@@ -124,12 +131,24 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 		pn_delivery_update(d,PN_ACCEPTED);
 	    pn_delivery_settle(d);
 
+	    // Extract the LaMP packet from the AMQP message
+	    amqp_type=lampPacketDecoder(amqp_message_buf,rx_size,&lampPacketBytes);
+
+	    if(amqp_type!=PN_BINARY && opts->verboseFlag) {
+	    	fprintf(stdout,"[INFO] Ignored an AMQP message with type=%s\n",pn_type_name(amqp_type));
+	    	return 3;
+	    }
+
+	    lampHeaderPtr=(struct lamphdr *)lampPacketBytes.lampPacket.start;
+
 		if(IS_LAMP(lampHeaderPtr->reserved,lampHeaderPtr->ctrl)) {
 			// If the packet is really a LaMP packet, get the header data, including the embedded timestamp
-			lampHeadGetData(lampPacket,&lamp_type_rx,&lamp_id_rx,&lamp_seq_rx,NULL,&tx_timestamp,NULL);
+			lampHeadGetData((byte_t *)lampPacketBytes.lampPacket.start,&lamp_type_rx,&lamp_id_rx,&lamp_seq_rx,NULL,&tx_timestamp,NULL);
 
 			if(opts->verboseFlag) {
-				display_packet("[INFO] LaMP packet content",lampPacket,rx_size-LAMP_PACKET_OFFSET);
+				display_packet("[INFO] LaMP packet content (truncated)",
+					(byte_t *)lampPacketBytes.lampPacket.start,
+					lampPacketBytes.lampPacket.size<=VERBOSE_PRINT_RX_PACKET_BYTES ? lampPacketBytes.lampPacket.size : VERBOSE_PRINT_RX_PACKET_BYTES);
 			}
 
 			// Only UNIDIR packets are supported as of now, as only the unidirectional mode is available for AMQP 1.0
@@ -153,17 +172,17 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 
 			timevalSub_retval=timevalSub(&tx_timestamp,&rx_timestamp);
 			if(timevalSub_retval) {
-				fprintf(stderr,"Error: negative latency (-%.3f ms - %s) for packet from queue/topic %s (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+				fprintf(stderr,"Error: negative latency (-%.3f ms - %s) for packet from queue/topic %s (id=%u, seq=%u, rx_bytes=%zd)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
 						(double) (rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec)/1000,latencyTypePrinter(opts->latencyType),
-						pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,(int)rx_size-LAMP_PACKET_OFFSET);
+						pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,lampPacketBytes.lampPacket.size);
 				tripTime=0;
 			} else {
 				tripTime=rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec;
 			}
 
 			if(tripTime!=0) {
-				fprintf(stdout,"Received a unidirectional message from queue/topic %s (id=%u, seq=%u, rx_bytes=%d). Time: %.3f ms (%s)\n",
-					pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,(int)rx_size-LAMP_PACKET_OFFSET,(double)tripTime/1000,latencyTypePrinter(opts->latencyType));
+				fprintf(stdout,"Received a unidirectional message from queue/topic %s (id=%u, seq=%u, rx_bytes=%zd). Time: %.3f ms (%s)\n",
+					pn_terminus_get_address(pn_link_source(lnk)),lamp_id_rx,lamp_seq_rx,lampPacketBytes.lampPacket.size,(double)tripTime/1000,latencyTypePrinter(opts->latencyType));
 			}
 
 			// Update the current report structure
@@ -179,6 +198,8 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 		}
 	}
 
+	lampPacketBytesFree(&lampPacketBytes);
+
 	return continueFlag;
 }
 
@@ -186,18 +207,21 @@ static int amqpInitACKreceiver(lamptype_t type,pn_link_t *lnk,pn_delivery_t *d,s
 	size_t rx_size;
 	int isRightMsgReceived=0;
 
-	// AMQP message buffer (size: maximum LaMP packet length + LAMP_PACKET_OFFSET bytes of AMQP header)
-	char amqp_message_buf[MAX_LAMP_LEN+LAMP_PACKET_OFFSET];
+	// AMQP message buffer (size: maximum LaMP packet length + ADDITIONAL_AMQP_HEADER_MAX_SIZE)
+	char amqp_message_buf[MAX_LAMP_LEN+ADDITIONAL_AMQP_HEADER_MAX_SIZE];
 
-	// Pointer to LaMP packet buffer with size = maximum LaMP packet length
-	byte_t *lampPacket=(byte_t *) &(amqp_message_buf[0])+LAMP_PACKET_OFFSET;
-	// Pointer to the LaMP header, inside the packet buffer
-	struct lamphdr *lampHeaderPtr=(struct lamphdr *) lampPacket;
+	// Structure containing the LaMP packet extracted from the AMQP message
+	lampPacket_bytes_t lampPacketBytes;
+	// Pointer to the LaMP header, inside the LaMP packet buffer
+	struct lamphdr *lampHeaderPtr;
 
 	// LaMP relevant fields
 	lamptype_t lamp_type_rx;
 	uint16_t lamp_id_rx;
 	uint16_t lamp_type_idx;
+
+	// Received AMQP data type
+	pn_type_t amqp_type;
 
 	// Get size of pending (received) message data
 	rx_size=pn_delivery_pending(d);
@@ -205,11 +229,21 @@ static int amqpInitACKreceiver(lamptype_t type,pn_link_t *lnk,pn_delivery_t *d,s
 	pn_link_recv(lnk,amqp_message_buf,rx_size);
 	// If the delivery is not partial, nor aborted, proceeding with reading the message
 	if(!pn_delivery_partial(d) && !pn_delivery_aborted(d)) {
+		// Extract the LaMP packet from the AMQP message
+		amqp_type=lampPacketDecoder(amqp_message_buf,rx_size,&lampPacketBytes);
+
+	    if(amqp_type!=PN_BINARY && opts->verboseFlag) {
+	    	fprintf(stdout,"[INFO] Ignored an AMQP message with type=%s, while waiting for ACK\n",pn_type_name(amqp_type));
+	    	return 3;
+	    }
+
+	    lampHeaderPtr=(struct lamphdr *)lampPacketBytes.lampPacket.start;
+
 		if(IS_LAMP(lampHeaderPtr->reserved,lampHeaderPtr->ctrl)) {
-			lampHeadGetData(lampPacket,&lamp_type_rx,&lamp_id_rx,NULL,&lamp_type_idx,NULL,NULL);
+			lampHeadGetData((byte_t *)lampPacketBytes.lampPacket.start,&lamp_type_rx,&lamp_id_rx,NULL,&lamp_type_idx,NULL,NULL);
 
 			if(opts!=NULL && opts->verboseFlag) {
-				display_packet("[INFO] LaMP packet content",lampPacket,rx_size-LAMP_PACKET_OFFSET);
+				display_packet("[INFO] LaMP packet content",(byte_t *)lampPacketBytes.lampPacket.start,lampPacketBytes.lampPacket.size);
 			}
 
 			if(lamp_type_rx==INIT) {
@@ -237,6 +271,8 @@ static int amqpInitACKreceiver(lamptype_t type,pn_link_t *lnk,pn_delivery_t *d,s
 	} else {
 		fprintf(stderr,"Delivery error: the current delivery is either partial or aborted. Aborted: %d, Partial: %d\n",pn_delivery_aborted(d),pn_delivery_partial(d));
 	}
+
+	lampPacketBytesFree(&lampPacketBytes);
 
 	// Data has been processed
 	pn_delivery_update(d,PN_ACCEPTED);
