@@ -94,8 +94,6 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 		return -1;
 	}
 
-	fprintf(stdout,"[TBR] counter=%d\n",*counter);
-
 	// Set UNIDIR_STOP type if this is the last packet
 	if(*counter==opts->number-1) {
 		lampSetUnidirStop(commonLampHeader);
