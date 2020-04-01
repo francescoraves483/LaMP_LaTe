@@ -94,6 +94,8 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 		return -1;
 	}
 
+	fprintf(stdout,"[TBR] counter=%d\n",*counter);
+
 	// Set UNIDIR_STOP type if this is the last packet
 	if(*counter==opts->number-1) {
 		lampSetUnidirStop(commonLampHeader);
@@ -102,10 +104,6 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 
 	snprintf(deliverytag_unidir_seq,DELIVERYTAG_UNIDIR_SEQ_SIZE,"unidirdelivery_%05" PRIu16,*counter);
 	pn_delivery(lnk,pn_dtag(deliverytag_unidir_seq,sizeof(deliverytag_unidir_seq)));
-
-	// Increase sequence number for the next iteration and counter
-	lampHeadIncreaseSeq(commonLampHeader);
-	(*counter)++;
 
 	pn_message_clear(aData->message);
 	message_body=pn_message_body(aData->message);
@@ -132,6 +130,10 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 
 	fprintf(stdout,"Sent unidirectional AMQP transfer on link %s (id=%u, seq=%u)\n",
 		pn_terminus_get_address(pn_link_target(lnk)),lamp_id_session,*counter);
+
+	// Increase sequence number and counter for the next iteration
+	lampHeadIncreaseSeq(commonLampHeader);
+	(*counter)++;
 
 	return 1;
 }
