@@ -45,6 +45,13 @@ static pthread_mutex_t ack_init_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex
 static uint8_t followup_reply_received=0; // Global flag set by the followupReplyListener thread: = 1 when a reply has been received, otherwise it is = 0
 static pthread_mutex_t followup_reply_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the followup_reply_received variable
 
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+	static _Atomic int rx_loop_timeout_error=0; // If C11 atomic variables are supported, just define an atomic integer variable
+#else
+	static uint8_t rx_loop_timeout_error=0; // Global flag which is set to 1 by the rx loop, in bidirectional mode, when a timeout occurs, to stop also the tx loop
+	static pthread_mutex_t rx_loop_timeout_error_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the rx_loop_timeout_error_mut variable
+#endif
+
 
 extern inline int timevalSub(struct timeval *in, struct timeval *out);
 
@@ -329,6 +336,19 @@ static void txLoop (arg_struct_udp *args) {
 
 	// Run until 'number' is reached
 	while(counter<args->opts->number) {
+		// Stop the loop if the rx loop has reported a timeout
+		#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+			if(rx_loop_timeout_error==1) {
+				break;
+			}
+		#else
+			pthread_mutex_lock(&rx_loop_timeout_error_mut);
+			if(rx_loop_timeout_error==1) {
+				break;
+			}
+			pthread_mutex_unlock(&rx_loop_timeout_error_mut);
+		#endif
+
 		// poll waiting for events happening on the timer descriptor (i.e. wait for timer expiration)
 		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
 			// "Clear the event" by performing a read() on a junk variable
@@ -421,9 +441,9 @@ static void txLoop (arg_struct_udp *args) {
 
 	// Free payload buffer
 	if(args->opts->payloadlen!=0) {
-		free(payload_buff);
+		if(payload_buff) free(payload_buff);
 		// Free the LaMP packet buffer only if it was allocated (otherwise a SIGSEGV may occur if payloadLen is 0)
-		free(lampPacket);
+		if(lampPacket) free(lampPacket);
 	}
 
 	// Close timer file descriptor
@@ -483,9 +503,10 @@ static void *rxLoop_t (void *arg) {
 	timevalStoreList txstampslist=NULL_SL;
 
 	// Per-packet data structure (to be used when -W is selected)
-	// The followup_on_flag can be already set here
+	// The followup_on_flag can be already set here, just like the pointer to the report structure
 	perPackerDataStructure perPktData;
 	perPktData.followup_on_flag=args->opts->followup_mode!=FOLLOWUP_OFF;
+	perPktData.reportDataPointer=&reportData;
 
 	// struct sockaddr_in to store the source IP address of the received LaMP packets
 	struct sockaddr_in srcAddr;
@@ -550,6 +571,18 @@ static void *rxLoop_t (void *arg) {
 			if(errno==EAGAIN) {
 				t_rx_error=ERR_TIMEOUT;
 				fprintf(stderr,"Timeout when waiting for new packets.\n");
+
+				// Signal to the tx loop that a timeout error occurred
+				#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+					rx_loop_timeout_error=1;
+				#else
+					pthread_mutex_lock(&rx_loop_timeout_error_mut);
+					rx_loop_timeout_error=1;
+					pthread_mutex_unlock(&rx_loop_timeout_error_mut);
+				#endif
+
+
+				reportSetTimeoutOccurred(&reportData);
 			} else {
 				t_rx_error=ERR_RECVFROM_GENERIC;
 			}
@@ -949,12 +982,16 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	// Print error messages, if errors have occurred (and, in case of error, return 1)
 	if(t_tx_error!=NO_ERR) {
 		thread_error_print("UDP Tx loop", t_tx_error);
-		return 1;
 	}
 
 	if(t_rx_error!=NO_ERR) {
 		thread_error_print("UDP Rx loop", t_rx_error);
-		return 1;
+		// Directly return only if a timeout did not occur, as, in case of timeout, we should still print the report.
+		// If we exit now, losing the last packet (ENDREPLY or ENDREPLY_TLESS), which causes a timeout in the rx loop,
+		// may mean losing the whole test, which is not desiderable
+		if(t_rx_error!=ERR_TIMEOUT) {
+			return 1;
+		}
 	}
 
 	/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point

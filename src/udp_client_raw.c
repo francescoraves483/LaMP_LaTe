@@ -46,6 +46,13 @@ static pthread_mutex_t ack_init_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex
 static uint8_t followup_reply_received=0; // Global flag set by the followupReplyListener thread: = 1 when a reply has been received, otherwise it is = 0
 static pthread_mutex_t followup_reply_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the followup_reply_received variable
 
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+	static _Atomic int rx_loop_timeout_error=0; // If C11 atomic variables are supported, just define an atomic integer variable
+#else
+	static uint8_t rx_loop_timeout_error=0; // Global flag which is set to 1 by the rx loop, in bidirectional mode, when a timeout occurs, to stop also the tx loop
+	static pthread_mutex_t rx_loop_timeout_error_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the rx_loop_timeout_error_mut variable
+#endif
+
 extern inline int timevalSub(struct timeval *in, struct timeval *out);
 
 // Function prototypes
@@ -381,6 +388,19 @@ static void txLoop (arg_struct *args) {
 
 	// Run until 'number' is reached
 	while(counter<args->opts->number) {
+		// Stop the loop if the rx loop has reported a timeout
+		#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+			if(rx_loop_timeout_error==1) {
+				break;
+			}
+		#else
+			pthread_mutex_lock(&rx_loop_timeout_error_mut);
+			if(rx_loop_timeout_error==1) {
+				break;
+			}
+			pthread_mutex_unlock(&rx_loop_timeout_error_mut);
+		#endif
+
 		// poll waiting for events happening on the timer descriptor (i.e. wait for timer expiration)
 		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
 			// "Clear the event" by performing a read() on a junk variable
@@ -536,9 +556,10 @@ static void *rxLoop_t (void *arg) {
 	char ctrlBufHwSw[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
 	// Per-packet data structure (to be used when -W is selected)
-	// The followup_on_flag can be already set here
+	// The followup_on_flag can be already set here, just like the pointer to the report structure
 	perPackerDataStructure perPktData;
 	perPktData.followup_on_flag=args->opts->followup_mode!=FOLLOWUP_OFF;
+	perPktData.reportDataPointer=&reportData;
 
 	// timevalStoreList to store the tx_timestamp values when -W is selected and follow-up mode is active
 	// A better explanation of this can be found in the comments inside udp_client.c
@@ -623,6 +644,17 @@ static void *rxLoop_t (void *arg) {
 			if(errno==EAGAIN) {
 				t_rx_error=ERR_TIMEOUT;
 				fprintf(stderr,"Timeout when waiting for new packets.\n");
+
+				// Signal to the tx loop that a timeout error occurred
+				#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+					rx_loop_timeout_error=1;
+				#else
+					pthread_mutex_lock(&rx_loop_timeout_error_mut);
+					rx_loop_timeout_error=1;
+					pthread_mutex_unlock(&rx_loop_timeout_error_mut);
+				#endif
+
+				reportSetTimeoutOccurred(&reportData);
 			} else {
 				t_rx_error=ERR_RECVFROM_GENERIC;
 			}

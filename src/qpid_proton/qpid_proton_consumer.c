@@ -376,6 +376,7 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 								// Already set some fields in the per-packet data structure, which won't change during the whole test
 								aData->perPktData.followup_on_flag=opts->followup_mode!=FOLLOWUP_OFF;
 								aData->perPktData.tripTimeProc=0;
+								aData->perPktData.reportDataPointer=reportPtr;
 
 								if(aData->Wfiledescriptor<0) {
 									fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");

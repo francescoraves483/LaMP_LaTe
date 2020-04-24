@@ -21,6 +21,9 @@
 
 #define TSTUDTHRS_INCR 0.001
 
+// First number after UINT16_MAX (i.e. 65536 = 2^16, used for sequence number reconstruction after cyclical resets)
+#define UINT16_TOP (UINT16_MAX+1)
+
 // Static function to compute ts, to be used to compute the confidence intervals
 /* 	It tries to emulate functions such as MATLAB's tinv(), but without inverting the Student's T cumulative distribution,
 	guaranteeing a precision of 3 decimal digits over the returned values.
@@ -118,8 +121,12 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 	// Internal members
 	report->_isFirstUpdate=1;
 
-	// Initialize also the lastSeqNumber, just to be safe against bugs in the following code, which should set, in any case, _lastSeqNumber
-	report->_lastSeqNumber=0;
+	// Initialize also the lastSeqNumber, just to be safe against bugs in the following code, which should set, in any case, lastSeqNumber
+	report->lastSeqNumber=0;
+
+	report->seqNumberResets=0;
+
+	report->_timeoutOccurred=0;
 
 	report->_welfordM2=0;
 
@@ -132,10 +139,16 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 	report->packetCount++;
 
 	if(tripTime!=0) {
-		// Set _lastSeqNumber on first update
+		// Set lastSeqNumber on first update
 		if(report->_isFirstUpdate==1) {
-			report->_lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
+			report->lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
 			report->_isFirstUpdate=0;
+		} else {
+			// Try to infer if a sequence number reset occurred
+			// This operation is placed here as it is applicable only when this is not the first report update
+			if((int32_t)seqNumber-(int32_t)report->lastSeqNumber<-SEQUENCE_NUMBERS_RESET_THRESHOLD) {
+				report->seqNumberResets++;
+			}
 		}
 
 		report->_welfordAverageLatencyOld=report->averageLatency;
@@ -153,12 +166,12 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 		// The out of order count is related here to the number of times a decreasing sequence number is detected.
 		// When the last sequence number is 65535 (UINT16_MAX), due to cyclic numbers, the expected current one is 0
 		// This should not be detected as an error, as it is the only situation in which a decreasing sequence number is expected
-		if(report->_lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->_lastSeqNumber) {
+		if(report->lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->lastSeqNumber) {
 			report->outOfOrderCount++;
 		}
 
 		// Set last sequence number
-		report->_lastSeqNumber=seqNumber;
+		report->lastSeqNumber=seqNumber;
 
 		// Compute the current variance (std dev squared) value using Welford's online algorithm
 		report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
@@ -170,6 +183,10 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 		// This packet will be counter as received, but it will not be used to compute the final statistics
 		report->errorsCount++;
 	}
+}
+
+void reportSetTimeoutOccurred(reportStructure *report) {
+	report->_timeoutOccurred=1;
 }
 
 void reportStructureFinalize(reportStructure *report) {
@@ -248,6 +265,21 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 
 		fprintf(stream, "Out of order count (approx. as the number of times a decreasing seq. number is detected): %" PRIu64 "\n",
 			report->outOfOrderCount);
+
+		fprintf(stream,"Est. number of cyclical sequence number resets: %" PRIu64 "\n",
+			report->seqNumberResets);
+
+		// If a timeout occurred, print that a timeout occurred and print also the packet loss up to that sequence number.
+		// The real last sequence number (as if LaMP sequence numbers were not cyclical) is estimated using report->seqNumberResets, with:
+		// (report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber-report->packetCount+1).
+		if(report->_timeoutOccurred==1) {
+			fprintf(stream,"Timeout occurred: last sequence number: %" PRIu16 " (non-cyclical: %" PRIu64 ")\nEst. packet loss up to last sequence number: %.2f%% [%" PRIi64 "/%" PRIi64 "]\n",
+				report->lastSeqNumber,
+				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,
+				((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1),
+				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber-report->packetCount+1,
+				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1);
+		}
 	}
 
 	if(report->totalPackets>UINT16_MAX) {
@@ -262,6 +294,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	int fileAlreadyExists=0;
 	struct tm *currdate;
 	double lostPktPerc=0;
+	double lostPktPercLastSeqNo=0;
 
 	if(opts->overwrite) {
 		csvfp=open(filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
@@ -286,7 +319,38 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 		if(opts->overwrite || !fileAlreadyExists) {
 			// Recreate CSV first line
-			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-ms,Interval-type,Interval-Distrib-Param,Interval-Distrib-Batch-Size,LatencyType,FollowUp,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,ErrorsCount,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
+			dprintf(csvfp,"Date,"
+				"Time,"
+				"ClientMode,"
+				"SocketType,"
+				"Protocol,"
+				"UP,"
+				"PayloadLen-B,"
+				"TotReqPackets,"
+				"Interval-ms,"
+				"Interval-type,"
+				"Interval-Distrib-Param,"
+				"Interval-Distrib-Batch-Size,"
+				"LatencyType,"
+				"FollowUp,"
+				"MinLatency-ms,"
+				"MaxLatency-ms,"
+				"AvgLatency-ms,"
+				"LostPackets-Perc,"
+				"ErrorsCount,"
+				"OutOfOrderCountDecr,"
+				"StDev-ms,"
+				"SeqNumberResets,"
+				"TimeoutOccurred,"
+				"lastSeqNumber,"
+				"lastSeqNumber-reconstructed-noncyclical,"
+				"LostPacketLastSeq-Perc,"
+				"ConfInt90l,"
+				"ConfInt90u,"
+				"ConfInt95l,"
+				"ConfInt95u,"
+				"ConfInt99l,"
+				"ConfInt99u\n");
 		}
 
 		// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
@@ -295,6 +359,13 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			lostPktPerc=report->totalPackets>=report->packetCount ? ((double) ((report->totalPackets-report->packetCount)))*100/(report->totalPackets) : ((double) ((report->packetCount-report->totalPackets)))*-100/(report->packetCount);
 		} else {
 			lostPktPerc=100;
+		}
+
+		// Do almost the same for the lost packet percentage up to the last received sequence number
+		if(report->minLatency!=UINT64_MAX) {
+			lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber);
+		} else {
+			lostPktPercLastSeqNo=100;
 		}
 
 		/* Save report data to file, in CSV style */
@@ -330,7 +401,12 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%.2f,"					// lost packets (perc)
 			"%" PRIu64 ","			// errors count
 			"%" PRIu64 ","			// out-of-order count
-			"%.4f,",				// standard deviation
+			"%.4f,"					// standard deviation
+			"%" PRIu64 ","			// est. number of sequence number resets
+			"%d,"					// timeout occurred (0 = no, 1 = yes)
+			"%" PRIu16 ","			// last sequence number
+			"%" PRIu64 ","			// last sequence number (non cyclical, reconstructed)
+			"%.2f,",				// lost packets up to last sequence number (perc)
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
 			opts->number,																											// total number of packets requested
@@ -346,9 +422,14 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			lostPktPerc,																											// lost packets (perc)
 			report->errorsCount,																									// errors count
 			report->outOfOrderCount,																								// Out-of-order count
-			sqrt(report->variance)/1000);																							// standard deviation (sqrt of variance)
+			sqrt(report->variance)/1000,																							// standard deviation (sqrt of variance)
+			report->seqNumberResets,																								// est. number of sequence number resets
+			report->_timeoutOccurred,																								// timeout occurred (0 = no, 1 = yes)
+			report->lastSeqNumber,																									// last sequence number
+			(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,															// last sequence number (non cyclical, reconstructed)
+			lostPktPercLastSeqNo);																									// lost packets up to last sequence number (perc)																						
 
-		// Save confidence intervals data
+		// Save confidence intervals data (if a confidence interval is negative, limit it to 0, as real latency cannot be negative)
 		for(int i=0;i<CONFINT_NUMBER;i++) {
 			dprintf(csvfp,
 				"%.3f,"
@@ -439,18 +520,22 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 	int dprintf_ret_val;
 
 	if(perPktData->followup_on_flag==0) {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%ld.%06ld,%d\n",
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%ld.%06ld,%d,%" PRIu64 ",%" PRIu64 "\n",
 			perPktData->seqNo,
 			decimal_digits,(double)(perPktData->signedTripTime)/1000,
 			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
-			perPktData->signedTripTime<=0 ? 1 : 0);
+			perPktData->signedTripTime<=0 ? 1 : 0,
+			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets : -1,
+			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:-1);
 	} else {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d\n",
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d,%" PRIu64 ",%" PRIu64 "\n",
 			perPktData->seqNo,
 			decimal_digits,(double)(perPktData->signedTripTime)/1000,
 			decimal_digits,(double)(perPktData->tripTimeProc)/1000,
 			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
-			perPktData->signedTripTime<=0 ? 1 : 0);
+			perPktData->signedTripTime<=0 ? 1 : 0,
+			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets : -1,
+			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:-1);
 	}
 
 	return dprintf_ret_val;

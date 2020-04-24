@@ -321,9 +321,11 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	// The followup_on_flag can be already set here, together with tripTimeProc,
 	// as there is no processing time estimation when working in unidirectional mode
 	// (i.e. when working on the only mode in which the server can actually use -W)
+	// Also the pointer to the report structure can be set here
 	perPackerDataStructure perPktData;
 	perPktData.followup_on_flag=0;
 	perPktData.tripTimeProc=0;
+	perPktData.reportDataPointer=&reportData;
 
 	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
 	int timevalSub_retval=0;
@@ -458,6 +460,9 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 		if(rcv_bytes==-1) {
 			if(errno==EAGAIN) {
 				fprintf(stderr,"Timeout reached when receiving packets. Connection terminated.\n");
+				if(mode_session==UNIDIR) {
+					reportSetTimeoutOccurred(&reportData);
+				}
 				break;
 			} else {
 				fprintf(stderr,"Generic recvfrom() error. errno = %d.\n",errno);

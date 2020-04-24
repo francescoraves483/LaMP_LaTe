@@ -9,8 +9,8 @@
 #include <stdio.h>
 #include "options.h"
 
-// Taking into account 20 characters to represent each 64 bit number + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 7 '-' chacaters=20*5+25*2+1+7=158 + some margin = 170
-#define REPORT_BUFF_SIZE 170
+// Taking into account 20 characters to represent each 64 bit number + 5 characters to represent a 16 bit nummber + 3 characters to represent a 8 bit nummber + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 10 '-' chacaters=20*6+6+25*2+1+10=158 + some margin = 201
+#define REPORT_BUFF_SIZE 201
 
 #define CONFINT_NUMBER 3
 
@@ -20,18 +20,23 @@
 #define W_MAX_FILE_NUMBER_DIGITS 4
 
 // Header line when for CSV files containing per-packet data, both when follow-up is enabled and when it is disabled
-#define PERPACKET_FILE_HEADER_NO_FOLLOWUP "Sequence Number,RTT/Latency,Tx_Timestamp_s_us,Error\n"
-#define PERPACKET_FILE_HEADER_FOLLOWUP "Sequence Number,RTT/Latency,Est server processing time,Tx_Timestamp_s_us,Error\n"
+#define PERPACKET_FILE_HEADER_NO_FOLLOWUP "Sequence Number,RTT/Latency,Tx_Timestamp_s_us,Error,Sequence Number Resets,Reconstructed Sequence Number\n"
+#define PERPACKET_FILE_HEADER_FOLLOWUP "Sequence Number,RTT/Latency,Est server processing time,Tx_Timestamp_s_us,Error,Sequence Number Resets,Reconstructed Sequence Number\n"
+
+// Expected negative gap to detect a reset in the cyclical sequence numbers
+#define SEQUENCE_NUMBERS_RESET_THRESHOLD 10000
 
 // Macro to write the report into a string
-#define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf", \
+#define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf-%" PRIu16 "-%" PRIu64 "-%" PRIu8, \
 									rep1.minLatency,rep1.averageLatency,rep1.maxLatency,rep1.packetCount, \
-									rep1.outOfOrderCount,rep1.errorsCount,(int) (rep1.latencyType),rep1.variance);
+									rep1.outOfOrderCount,rep1.errorsCount,(int) (rep1.latencyType),rep1.variance,rep1.lastSeqNumber, \
+									rep1.seqNumberResets,rep1._timeoutOccurred);
 
 // Macro to read from a report stored in a string
-#define repscanf(str1,rep1ptr)		sscanf(str1,"%" SCNu64 "-%lf-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%d-%lf", \
+#define repscanf(str1,rep1ptr)		sscanf(str1,"%" SCNu64 "-%lf-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%d-%lf-%" SCNu16 "-%" SCNu64 "-%" SCNu8, \
 									rep1ptr.minLatency,rep1ptr.averageLatency,rep1ptr.maxLatency,rep1ptr.packetCount, \
-									rep1ptr.outOfOrderCount,rep1ptr.errorsCount,(int *) (rep1ptr.latencyType),rep1ptr.variance);
+									rep1ptr.outOfOrderCount,rep1ptr.errorsCount,(int *) (rep1ptr.latencyType),rep1ptr.variance,rep1ptr.lastSeqNumber, \
+									rep1ptr.seqNumberResets,rep1ptr._timeoutOccurred);
 
 typedef struct reportStructure {
 	uint64_t minLatency;		// us
@@ -45,12 +50,15 @@ typedef struct reportStructure {
 
 	double variance;			// us
 
+	uint16_t lastSeqNumber;		// # - last received sequence number
+	uint64_t seqNumberResets;	// # - est. of the number of times the sequence numbers were reset due to being cyclical
+
 	latencytypes_t latencyType; // enum (defined in options.h)
 	modefollowup_t followupMode; // enum (defined in options.h)
 
 	// Internal members
 	// Don't touch these variables, as they are managed internally by reportStructureUpdate()
-	uint16_t _lastSeqNumber;			// # - not transmitted/not printed
+	uint8_t _timeoutOccurred;			// [0,1] - transmitted/not printed
 	uint8_t _isFirstUpdate; 			// [0,1] - not transmitted/not printed
 	double _welfordM2;					// us - not transmitted/not printed
 	double _welfordAverageLatencyOld;	// us - not transmitted/not printed
@@ -66,10 +74,12 @@ typedef struct perPackerDataStructure {
 	int64_t signedTripTime;
 	uint64_t tripTimeProc;
 	struct timeval tx_timestamp;
+	reportStructure *reportDataPointer;
 } perPackerDataStructure;
 
 void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode);
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber);
+void reportSetTimeoutOccurred(reportStructure *report);
 void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
