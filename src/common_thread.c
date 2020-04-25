@@ -29,6 +29,9 @@ void thread_error_print(const char *name, t_error_types err) {
 		case ERR_TIMEOUT:
 			fprintf(stderr,"%s reported an error: reception timed out.\n",name);
 			break;
+		case ERR_REPORT_TIMEOUT:
+			fprintf(stderr,"%s reported an error: reception timed out when waiting for a REPORT.\n",name);
+			break;
 		case ERR_TIMEOUT_ACK:
 			fprintf(stderr,"%s reported an error: reception timed out when waiting for an ACK.\n",name);
 			break;

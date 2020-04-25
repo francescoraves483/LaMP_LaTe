@@ -46,7 +46,7 @@ int main (int argc, char **argv) {
 
 	#if AMQP_1_0_ENABLED
 	// AMQP 1.0 management structure
-	struct amqp_data aData;
+	struct amqp_data aData={.Wfiledescriptor=0};
 	#endif
 
 	// Rx timeout structure

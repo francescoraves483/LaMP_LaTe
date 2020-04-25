@@ -345,6 +345,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 				"lastSeqNumber,"
 				"lastSeqNumber-reconstructed-noncyclical,"
 				"LostPacketLastSeq-Perc,"
+				"reportingSuccessfull,"
 				"ConfInt90l,"
 				"ConfInt90u,"
 				"ConfInt95l,"
@@ -363,7 +364,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 		// Do almost the same for the lost packet percentage up to the last received sequence number
 		if(report->minLatency!=UINT64_MAX) {
-			lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber);
+			lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1);
 		} else {
 			lostPktPercLastSeqNo=100;
 		}
@@ -406,7 +407,8 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%d,"					// timeout occurred (0 = no, 1 = yes)
 			"%" PRIu16 ","			// last sequence number
 			"%" PRIu64 ","			// last sequence number (non cyclical, reconstructed)
-			"%.2f,",				// lost packets up to last sequence number (perc)
+			"%.2f,"					// lost packets up to last sequence number (perc)
+			"%d,",					// reportingSuccessfull (= 1 if everything is ok, = 0 if a reporting error occurred)
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
 			opts->number,																											// total number of packets requested
@@ -426,27 +428,39 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			report->seqNumberResets,																								// est. number of sequence number resets
 			report->_timeoutOccurred,																								// timeout occurred (0 = no, 1 = yes)
 			report->lastSeqNumber,																									// last sequence number
-			(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,															// last sequence number (non cyclical, reconstructed)
-			lostPktPercLastSeqNo);																									// lost packets up to last sequence number (perc)																						
-
+			(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,																// last sequence number (non cyclical, reconstructed)
+			lostPktPercLastSeqNo,																									// lost packets up to last sequence number (perc)																						
+			report->minLatency!=UINT64_MAX);																						// reportingSuccessfull (= 1 if everything is ok, = 0 if a reporting error occurred)
+		
 		// Save confidence intervals data (if a confidence interval is negative, limit it to 0, as real latency cannot be negative)
-		for(int i=0;i<CONFINT_NUMBER;i++) {
-			dprintf(csvfp,
-				"%.3f,"
-				"%.3f",
-				report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
-				(report->averageLatency+report->confidenceIntervalDev[i])/1000);
+		// Do this only if there is actually data in the report (i.e. if at least one packet has been received - if no packets have
+		// been received or if no report was received back in unidirectional mode, report->minLatency is expected to be still equal
+		// to its initialized value (i.e. UINT64_MAX)
+		if(report->minLatency!=UINT64_MAX) {
+			for(int i=0;i<CONFINT_NUMBER;i++) {
+				dprintf(csvfp,
+					"%.3f,"
+					"%.3f",
+					report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+					(report->averageLatency+report->confidenceIntervalDev[i])/1000);
 
-			if(i<CONFINT_NUMBER-1) {
-				dprintf(csvfp,",");
-			} else {
-				dprintf(csvfp,"\n");
+				if(i<CONFINT_NUMBER-1) {
+					dprintf(csvfp,",");
+				} else {
+					dprintf(csvfp,"\n");
+				}
 			}
+		} else {
+			dprintf(csvfp,"-1,-1,-1,-1,-1,-1\n");
 		}
 
 		close(csvfp);
 
-		fprintf(stdout,"Report data was saved inside %s\n",opts->filename);
+		if(report->minLatency!=UINT64_MAX) {
+			fprintf(stdout,"Report data was saved inside %s\n",opts->filename);
+		} else {
+			fprintf(stdout,"Empty report data (test failed) was saved inside %s\n",opts->filename);
+		}
 	} else {
 		printOpErrStatus=1;
 	}

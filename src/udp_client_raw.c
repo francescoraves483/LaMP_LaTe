@@ -890,7 +890,7 @@ static void unidirRxTxLoop (arg_struct *args) {
 		// Timeout or other recvfrom() error occurred
 		if(rcv_bytes==-1) {
 			if(errno==EAGAIN) {
-				t_rx_error=ERR_TIMEOUT;
+				t_rx_error=ERR_REPORT_TIMEOUT;
 				fprintf(stderr,"Timeout when waiting for the report. No report will be printed by the client.\n");
 			} else {
 				t_rx_error=ERR_RECVFROM_GENERIC;
@@ -1121,15 +1121,24 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	if(t_rx_error!=NO_ERR) {
 		thread_error_print("UDP Rx loop", t_rx_error);
+
+		// Directly return only if a timeout did not occur, as, in case of timeout, we should still print the report.
+		// If we exit now, losing the last packet (ENDREPLY or ENDREPLY_TLESS), which causes a timeout in the rx loop,
+		// may mean losing the whole test, which is not desiderable
+		if(t_rx_error!=ERR_TIMEOUT && t_rx_error!=ERR_REPORT_TIMEOUT) {
+			return 1;
+		}
 		return 1;
 	}
 
-	/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
-	with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
-	fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
-	// Print the statistics, if no error, before returning
-	reportStructureFinalize(&reportData);
-	printStats(&reportData,stdout,opts->confidenceIntervalMask);
+	if(t_rx_error!=ERR_REPORT_TIMEOUT) {
+		/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
+		with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
+		fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
+		// Print the statistics, if no error, before returning
+		reportStructureFinalize(&reportData);
+		printStats(&reportData,stdout,opts->confidenceIntervalMask);
+	}
 
 	if(opts->filename!=NULL) {
 		// If '-f' was specified, print the report data to a file too

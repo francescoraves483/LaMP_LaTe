@@ -19,6 +19,11 @@
 #define RX_LINK_CREDIT 2
 #define DELIVERYTAG_UNIDIR_SEQ_SIZE 21
 
+// Defines for pn_error_condition
+#define ERROR_COND_NO_ERROR 0
+#define ERROR_COND_AMQP_ERROR 1
+#define ERROR_COND_TIMEOUT 2
+
 static producer_status_t producerStatus=P_JUSTSTARTED;
 static uint16_t lamp_id_session;
 
@@ -455,7 +460,7 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
 	reportStructure reportData;
 
 	// Error flag for the main event loop
-	uint8_t pn_error_condition=0;
+	uint8_t pn_error_condition=ERROR_COND_NO_ERROR;
 
 	// Event handler return value
 	int pn_eventhdlr_retval=0;
@@ -499,27 +504,27 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
 		for(pn_event_t *e=pn_event_batch_next(events_batch);e!=NULL;e=pn_event_batch_next(events_batch)) {
 			pn_eventhdlr_retval=producerEventHandler(&aData,opts,&reportData,e);
 			if(pn_eventhdlr_retval==-1) {
-				pn_error_condition=1;
+				pn_error_condition=ERROR_COND_AMQP_ERROR;
 			} else if(pn_eventhdlr_retval==-2) {
-				fprintf(stdout,"Error: timeout occurred.\n");
-				pn_error_condition=1;
+				fprintf(stdout,"Error: timeout occurreddddd.\n");
+				pn_error_condition=ERROR_COND_TIMEOUT;
 			}
 		}
 		pn_proactor_done(aData.proactor,events_batch);
 	} while(!pn_error_condition && producerStatus!=P_ACKSENT);
 
-	if(!pn_error_condition) {
+	if(pn_error_condition==ERROR_COND_NO_ERROR) {
 		/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
 		with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
 		fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
 		// Print the statistics, if no error, before returning
 		reportStructureFinalize(&reportData);
 		printStats(&reportData,stdout,opts->confidenceIntervalMask);
+	} 
 
-		if(opts->filename!=NULL) {
-			// If '-f' was specified, print the report data to a file too
-			printStatsCSV(opts,&reportData,opts->filename);
-		}
+	if(opts->filename!=NULL && (pn_error_condition==ERROR_COND_NO_ERROR || pn_error_condition==ERROR_COND_TIMEOUT)) {
+		// If '-f' was specified, print the report data to a file too
+		printStatsCSV(opts,&reportData,opts->filename);
 	}
 
 	// Free Qpid proton allocated memory
