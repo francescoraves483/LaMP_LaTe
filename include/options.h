@@ -7,9 +7,9 @@
 #include "math_utils.h"
 
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmop:reA:BC:FM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmop:reX:A:BC:FM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmop:req:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmop:req:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -60,6 +60,9 @@
 
 // Default batch size when using a random interval (each batch will have the same interval between packets)
 #define BATCH_SIZE_DEF 10
+
+// Macro to check if report extra_data has a correct value
+#define REPORT_IS_REPORT_EXTRA_DATA_OK(enabled_extra_data) (enabled_extra_data=='a' || enabled_extra_data=='p' || enabled_extra_data=='r')
 
 // Latency types
 typedef enum {
@@ -139,6 +142,8 @@ struct options {
 	rand_distribution_t rand_type; // Random -t distribution type, set with '-R'. Default: NON_RAND (i.e. no random interval between packets)
 	double rand_param; // Its meaning depends on 'rand_type'
 	uint64_t rand_batch_size; // Defaults to BATCH_SIZE_DEF when rand_type!=NON_RAND or it is set to 'number' and practically not used when rand_type==NON_RAND
+
+	char report_extra_data; // Report extra data to be printed to -W CSV files only when explicitely requested
 };
 
 void options_initialize(struct options *options);

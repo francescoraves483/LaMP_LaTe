@@ -468,7 +468,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	return printOpErrStatus;
 }
 
-int openTfile(const char *Tfilename,int followup_on_flag) {
+int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_data) {
 	int csvfd;
 	char *Tfilename_fileno;
 
@@ -522,35 +522,88 @@ int openTfile(const char *Tfilename,int followup_on_flag) {
 
 	// Write CSV file header, depending on the followup_on_flag flag value
 	if(followup_on_flag==0) {
-		dprintf(csvfd,PERPACKET_FILE_HEADER_NO_FOLLOWUP);
+		dprintf(csvfd,PERPACKET_COMMON_FILE_HEADER_NO_FOLLOWUP);
 	} else {
-		dprintf(csvfd,PERPACKET_FILE_HEADER_FOLLOWUP);
+		dprintf(csvfd,PERPACKET_COMMON_FILE_HEADER_FOLLOWUP);
 	}
+
+	// Write additional data header section
+	switch(enabled_extra_data) {
+		case 'p':
+			dprintf(csvfd,",PER till now");
+			break;
+
+		case 'r':
+			dprintf(csvfd,",Reconstructed Sequence Number");
+			break;
+
+		case 'a':
+			dprintf(csvfd,",PER till now,Reconstructed Sequence Number");
+			break;
+
+		default:
+			break;
+	}
+
+	dprintf(csvfd,"\n");
 
 	return csvfd;
 }
 
 int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData) {
 	int dprintf_ret_val;
+	// "PER Till Now" (Packet Error Rate till now) is basically computed as the percentage packet loss over all the packets before the last one
+	double perTillNow;
+	uint64_t reconstructedSeqNo;
 
 	if(perPktData->followup_on_flag==0) {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%ld.%06ld,%d,%" PRIu64 ",%" PRIu64 "\n",
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%ld.%06ld,%d",
 			perPktData->seqNo,
 			decimal_digits,(double)(perPktData->signedTripTime)/1000,
 			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
-			perPktData->signedTripTime<=0 ? 1 : 0,
-			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets : -1,
-			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:-1);
+			perPktData->signedTripTime<=0 ? 1 : 0);
 	} else {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d,%" PRIu64 ",%" PRIu64 "\n",
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d",
 			perPktData->seqNo,
 			decimal_digits,(double)(perPktData->signedTripTime)/1000,
 			decimal_digits,(double)(perPktData->tripTimeProc)/1000,
 			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
-			perPktData->signedTripTime<=0 ? 1 : 0,
-			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets : -1,
-			perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:-1);
+			perPktData->signedTripTime<=0 ? 1 : 0);
 	}
+
+	if(REPORT_IS_REPORT_EXTRA_DATA_OK(perPktData->enabled_extra_data)) {
+		// Print extra data to CSV file
+		switch(perPktData->enabled_extra_data) {
+			case 'p':
+				perTillNow=perPktData->reportDataPointer!=NULL ? 
+					((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) :
+					-1;
+				dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f",perTillNow);
+				break;
+
+			case 'r':
+				reconstructedSeqNo=perPktData->reportDataPointer!=NULL ? 
+					perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:
+					-1;
+				dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,reconstructedSeqNo);
+				break;
+
+			case 'a':
+				perTillNow=perPktData->reportDataPointer!=NULL ? 
+					((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) :
+					-1;
+				reconstructedSeqNo=perPktData->reportDataPointer!=NULL ? 
+					perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:
+					-1;
+				dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f,%" PRIu64,perTillNow,reconstructedSeqNo);
+				break;
+
+			default:
+				break;
+		}
+	}
+
+	dprintf_ret_val+=dprintf(Tfiledescriptor,"\n");
 
 	return dprintf_ret_val;
 }

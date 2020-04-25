@@ -388,6 +388,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	perPackerDataStructure perPktData;
 	perPktData.followup_on_flag=0;
 	perPktData.tripTimeProc=0;
+	perPktData.enabled_extra_data=opts->report_extra_data;
 	perPktData.reportDataPointer=&reportData;
 
 	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
@@ -476,7 +477,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	// Open CSV file when '-W' is specified (as this only applies to the unidirectional mode, no file is create when the mode is not unidirectional)
 	if(opts->Wfilename!=NULL && mode_session==UNIDIR) {
-		Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF);
+		Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF,opts->report_extra_data);
 		if(Wfiledescriptor<0) {
 			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
 		}

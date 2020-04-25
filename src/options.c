@@ -139,6 +139,11 @@ static void print_long_info(void) {
 		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
 		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
 		"\t  when this mode is activated.\n"
+		"  -X: when -W is specified, it is possible to print extra single packet information by specifying a character\n"
+		"\t  after -x. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
+		"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n"
+		"\t   when LaMP sequence numbers are cyclically reset between 65535 and 0 and 'a' will print both 'p' and 'r'.\n"
+		"\t   This option is valid only when -W is selected.\n"
 		"\n"
 
 		"[options] - Mandatory server options:\n"
@@ -182,6 +187,11 @@ static void print_long_info(void) {
 		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
 		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
 		"\t  when this mode is activated.\n"
+		"  -X: when -W is specified, it is possible to print extra single packet information by specifying a character\n"
+		"\t  after -x. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
+		"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n"
+		"\t   when LaMP sequence numbers are cyclically reset between 65535 and 0 and 'a' will print both 'p' and 'r'.\n"
+		"\t   This option is valid only when -W is selected.\n"
 		"\n"
 
 		"Example of usage:\n"
@@ -298,6 +308,8 @@ void options_initialize(struct options *options) {
 	options->rand_param=-1;
 
 	options->rand_batch_size=BATCH_SIZE_DEF;
+
+	options->report_extra_data=0; // No valid char specified when initializing the options structure
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -534,6 +546,25 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				}
 				break;
 			#endif
+
+			case 'X':
+				if(strlen(optarg)!=1) {
+					fprintf(stderr,"Error: only one character shall be specified after -x.\n");
+					print_short_info_err(options);
+				}
+
+				if(!REPORT_IS_REPORT_EXTRA_DATA_OK(optarg[0])) {
+					fprintf(stderr,"Error: invalid character specified after -X. Valid options:\n"
+						"  'p': print 'PER till now' for each packet\n"
+						"  'r': print 'Reconstructed (non cyclical) LaMP sequence numbers' for each packet\n"
+						"  'a': print all the available information.\n");
+					print_short_info_err(options);
+				}
+
+				options->report_extra_data=optarg[0];
+
+				break;
+
 
 			case 'A':
 				// This requires a patched kernel: print a warning!
@@ -1046,6 +1077,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 	if(options->rand_type!=NON_RAND && options->rand_batch_size>options->number) {
 		fprintf(stderr,"Error: the random interval batch size cannot be greater than the number of packets (i.e. %" PRIu64 ").\n",options->number);
+		print_short_info_err(options);
+	}
+
+	if(options->Wfilename==NULL && options->report_extra_data!=0) {
+		fprintf(stderr,"Error: the -X option requires -W to be selected too.\n");
 		print_short_info_err(options);
 	}
 

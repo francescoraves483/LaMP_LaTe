@@ -506,6 +506,7 @@ static void *rxLoop_t (void *arg) {
 	// The followup_on_flag can be already set here, just like the pointer to the report structure
 	perPackerDataStructure perPktData;
 	perPktData.followup_on_flag=args->opts->followup_mode!=FOLLOWUP_OFF;
+	perPktData.enabled_extra_data=args->opts->report_extra_data;
 	perPktData.reportDataPointer=&reportData;
 
 	// struct sockaddr_in to store the source IP address of the received LaMP packets
@@ -551,7 +552,7 @@ static void *rxLoop_t (void *arg) {
 
 	// Open CSV file when in "-W" mode (i.e. "write every packet measurement data to CSV file")
 	if(args->opts->Wfilename!=NULL) {
-		Wfiledescriptor=openTfile(args->opts->Wfilename,args->opts->followup_mode!=FOLLOWUP_OFF);
+		Wfiledescriptor=openTfile(args->opts->Wfilename,args->opts->followup_mode!=FOLLOWUP_OFF,args->opts->report_extra_data);
 		if(Wfiledescriptor<0) {
 			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
 		}

@@ -371,12 +371,13 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 							if(opts->Wfilename!=NULL) {
 								// No follow-up is supported for AMQP 1.0 testing, but, instead of passing just '0' to openTfile() it can be useful to keep
 								//  the check for a possible follow-up mode, as it may be implemented in some way in the future
-								aData->Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF);
+								aData->Wfiledescriptor=openTfile(opts->Wfilename,opts->followup_mode!=FOLLOWUP_OFF,opts->report_extra_data);
 
 								// Already set some fields in the per-packet data structure, which won't change during the whole test
 								aData->perPktData.followup_on_flag=opts->followup_mode!=FOLLOWUP_OFF;
 								aData->perPktData.tripTimeProc=0;
 								aData->perPktData.reportDataPointer=reportPtr;
+								aData->perPktData.enabled_extra_data=opts->report_extra_data;
 
 								if(aData->Wfiledescriptor<0) {
 									fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");

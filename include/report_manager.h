@@ -20,8 +20,8 @@
 #define W_MAX_FILE_NUMBER_DIGITS 4
 
 // Header line when for CSV files containing per-packet data, both when follow-up is enabled and when it is disabled
-#define PERPACKET_FILE_HEADER_NO_FOLLOWUP "Sequence Number,RTT/Latency,Tx_Timestamp_s_us,Error,Sequence Number Resets,Reconstructed Sequence Number\n"
-#define PERPACKET_FILE_HEADER_FOLLOWUP "Sequence Number,RTT/Latency,Est server processing time,Tx_Timestamp_s_us,Error,Sequence Number Resets,Reconstructed Sequence Number\n"
+#define PERPACKET_COMMON_FILE_HEADER_NO_FOLLOWUP "Sequence Number,RTT/Latency,Tx_Timestamp_s_us,Error"
+#define PERPACKET_COMMON_FILE_HEADER_FOLLOWUP "Sequence Number,RTT/Latency,Est server processing time,Tx_Timestamp_s_us,Error"
 
 // Expected negative gap to detect a reset in the cyclical sequence numbers
 #define SEQUENCE_NUMBERS_RESET_THRESHOLD 10000
@@ -74,6 +74,7 @@ typedef struct perPackerDataStructure {
 	int64_t signedTripTime;
 	uint64_t tripTimeProc;
 	struct timeval tx_timestamp;
+	char enabled_extra_data;
 	reportStructure *reportDataPointer;
 } perPackerDataStructure;
 
@@ -83,7 +84,7 @@ void reportSetTimeoutOccurred(reportStructure *report);
 void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
-int openTfile(const char *Tfilename, int followup_on_flag);
+int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_data);
 int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData);
 void closeTfile(int Tfilepointer);
 
