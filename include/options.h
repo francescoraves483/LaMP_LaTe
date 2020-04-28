@@ -61,8 +61,23 @@
 // Default batch size when using a random interval (each batch will have the same interval between packets)
 #define BATCH_SIZE_DEF 10
 
+// Char <-> shift mapping for SET_REPORT_EXTRA_DATA_BIT
+// To use SET_REPORT_EXTRA_DATA_BIT() you should specify the report_extra_data variable and one of these macros
+#define CHAR_P 1
+#define CHAR_R 2
+#define CHAR_M 3
+#define CHAR_N 4
+
+// Utility macros to set and check the report_extra_data field's bit, enabling or disabling the printing of extra information to -W CSV files
+#define SET_REPORT_EXTRA_DATA_BIT(report_extra_data,char_macro) (report_extra_data |= 1UL << char_macro)
+#define SET_REPORT_DATA_ALL_BITS(report_extra_data) (report_extra_data=0xFF)
+#define CHECK_REPORT_EXTRA_DATA_BIT_SET(report_extra_data,char_macro) ((report_extra_data >> char_macro) & 1U)
+
 // Macro to check if report extra_data has a correct value
 #define REPORT_IS_REPORT_EXTRA_DATA_OK(enabled_extra_data) (enabled_extra_data=='a' || enabled_extra_data=='p' || enabled_extra_data=='r')
+
+// This value should be set to the number of bits in the type of "report_extra_data"
+#define REPORT_EXTRA_DATA_BIT_SIZE 16
 
 // Latency types
 typedef enum {
@@ -142,8 +157,14 @@ struct options {
 	rand_distribution_t rand_type; // Random -t distribution type, set with '-R'. Default: NON_RAND (i.e. no random interval between packets)
 	double rand_param; // Its meaning depends on 'rand_type'
 	uint64_t rand_batch_size; // Defaults to BATCH_SIZE_DEF when rand_type!=NON_RAND or it is set to 'number' and practically not used when rand_type==NON_RAND
-
-	char report_extra_data; // Report extra data to be printed to -W CSV files only when explicitely requested
+	
+	// Report extra data to be printed to -W CSV files only when explicitely requested
+	// It is saved as a set of bits (up to 16), which enable a certain extra information to be printed
+	// The bits meaning is (where "res"="reserved" and the character is the one toggling that bit/information with -X):
+	// (res) (res) (res) (res) (res) (res) (res) (res) (res) (res) (res) ('n') ('m') ('r') ('p')
+	// -X a will set all the bits to 1
+	// All the reserved bits are ignored, no matter the value they assume
+	uint16_t report_extra_data;
 };
 
 void options_initialize(struct options *options);

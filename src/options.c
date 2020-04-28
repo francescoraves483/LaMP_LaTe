@@ -139,10 +139,12 @@ static void print_long_info(void) {
 		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
 		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
 		"\t  when this mode is activated.\n"
-		"  -X: when -W is specified, it is possible to print extra single packet information by specifying a character\n"
-		"\t  after -x. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
+		"  -X: when -W is specified, it is possible to print extra single packet information by specifying some characters\n"
+		"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
 		"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n"
-		"\t   when LaMP sequence numbers are cyclically reset between 65535 and 0 and 'a' will print both 'p' and 'r'.\n"
+		"\t   when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n"
+		"\t   up to the current packet and 'n' will print the minimum measured value up to the current packet.\n"
+		"\t   'a' can be used as a shortcut to print all the available information.\n"
 		"\t   This option is valid only when -W is selected.\n"
 		"\n"
 
@@ -187,10 +189,12 @@ static void print_long_info(void) {
 		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
 		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
 		"\t  when this mode is activated.\n"
-		"  -X: when -W is specified, it is possible to print extra single packet information by specifying a character\n"
-		"\t  after -x. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
+		"  -X: when -W is specified, it is possible to print extra single packet information by specifying some characters\n"
+		"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
 		"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n"
-		"\t   when LaMP sequence numbers are cyclically reset between 65535 and 0 and 'a' will print both 'p' and 'r'.\n"
+		"\t   when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n"
+		"\t   up to the current packet and 'n' will print the minimum measured value up to the current packet.\n"
+		"\t   'a' can be used as a shortcut to print all the available information.\n"
 		"\t   This option is valid only when -W is selected.\n"
 		"\n"
 
@@ -548,20 +552,62 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			#endif
 
 			case 'X':
-				if(strlen(optarg)!=1) {
-					fprintf(stderr,"Error: only one character shall be specified after -x.\n");
+				{
+
+				size_t optargLen=strlen(optarg);
+
+				if(optargLen>REPORT_EXTRA_DATA_BIT_SIZE) {
+					fprintf(stderr,"Error: a maximum of %d characters can be specified after -X.\n",REPORT_EXTRA_DATA_BIT_SIZE);
 					print_short_info_err(options);
 				}
 
-				if(!REPORT_IS_REPORT_EXTRA_DATA_OK(optarg[0])) {
-					fprintf(stderr,"Error: invalid character specified after -X. Valid options:\n"
-						"  'p': print 'PER till now' for each packet\n"
-						"  'r': print 'Reconstructed (non cyclical) LaMP sequence numbers' for each packet\n"
-						"  'a': print all the available information.\n");
+				if(optargLen<=0) {
+					fprintf(stderr,"Error: cannot find any character after -X.\n");
 					print_short_info_err(options);
 				}
 
-				options->report_extra_data=optarg[0];
+				if(optargLen==1 && optarg[0]=='a') {
+					SET_REPORT_DATA_ALL_BITS(options->report_extra_data);
+				} else {
+					for(int i=0;i<optargLen;i++) {
+						if(optarg[i]=='p') {
+							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_P)) {
+								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'p');
+							}
+
+							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_P);
+						} else if(optarg[i]=='r') {
+							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_R)) {
+								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'r');
+							}
+
+							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_R);
+						} else if(optarg[i]=='m') {
+							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_M)) {
+								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'m');
+							}
+
+							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_M);
+						} else if(optarg[i]=='n') {
+							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_N)) {
+								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'n');
+							}
+
+							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_N);
+						} else if(optarg[i]=='a') {
+							fprintf(stderr,"Error: 'a' was specified, together with other -X characters, but it should be used alone.\n");
+							print_short_info_err(options);
+						} else {
+							fprintf(stderr,"Error: invalid character ('%c') specified after -X. Valid options:\n"
+								"  'p': print 'PER till now' for each packet\n"
+								"  'r': print 'Reconstructed (non cyclical) LaMP sequence numbers' for each packet\n"
+								"  'a': print all the available information.\n",optarg[i]);
+							print_short_info_err(options);
+						}
+					}
+				}
+
+				}
 
 				break;
 

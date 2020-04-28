@@ -74,7 +74,7 @@ typedef struct perPackerDataStructure {
 	int64_t signedTripTime;
 	uint64_t tripTimeProc;
 	struct timeval tx_timestamp;
-	char enabled_extra_data;
+	uint16_t enabled_extra_data; // See the "uint16_t report_extra_data" field in "struct options" (options.h) for a more detailed description of this field
 	reportStructure *reportDataPointer;
 } perPackerDataStructure;
 

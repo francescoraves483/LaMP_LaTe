@@ -527,22 +527,21 @@ int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_dat
 		dprintf(csvfd,PERPACKET_COMMON_FILE_HEADER_FOLLOWUP);
 	}
 
-	// Write additional data header section
-	switch(enabled_extra_data) {
-		case 'p':
-			dprintf(csvfd,",PER till now");
-			break;
+	// Write additional data header section (the order in which these 'ifs' are written is important)
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_P)) {
+		dprintf(csvfd,",PER till now");
+	}
 
-		case 'r':
-			dprintf(csvfd,",Reconstructed Sequence Number");
-			break;
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_R)) {
+		dprintf(csvfd,",Reconstructed Sequence Number");
+	}
 
-		case 'a':
-			dprintf(csvfd,",PER till now,Reconstructed Sequence Number");
-			break;
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_M)) {
+		dprintf(csvfd,",Current minimum");
+	}
 
-		default:
-			break;
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_N)) {
+		dprintf(csvfd,",Current maximum");
 	}
 
 	dprintf(csvfd,"\n");
@@ -550,6 +549,7 @@ int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_dat
 	return csvfd;
 }
 
+// When printing additional data with -X, this function shall always be called after updating the report with "reportStructureUpdate()"
 int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData) {
 	int dprintf_ret_val;
 	// "PER Till Now" (Packet Error Rate till now) is basically computed as the percentage packet loss over all the packets before the last one
@@ -571,36 +571,31 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 			perPktData->signedTripTime<=0 ? 1 : 0);
 	}
 
-	if(REPORT_IS_REPORT_EXTRA_DATA_OK(perPktData->enabled_extra_data)) {
-		// Print extra data to CSV file
-		switch(perPktData->enabled_extra_data) {
-			case 'p':
-				perTillNow=perPktData->reportDataPointer!=NULL ? 
-					((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) :
-					-1;
-				dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f",perTillNow);
-				break;
+	// Print extra data to CSV file, if requested with -X
+	// -X 'a' will set all the bits in "enabled_extra_data", thus making the program enter in all the if statements below
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
+		perTillNow=perPktData->reportDataPointer!=NULL ? 
+			((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) :
+			-1;
 
-			case 'r':
-				reconstructedSeqNo=perPktData->reportDataPointer!=NULL ? 
-					perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:
-					-1;
-				dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,reconstructedSeqNo);
-				break;
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f",perTillNow);
+	}
 
-			case 'a':
-				perTillNow=perPktData->reportDataPointer!=NULL ? 
-					((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) :
-					-1;
-				reconstructedSeqNo=perPktData->reportDataPointer!=NULL ? 
-					perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:
-					-1;
-				dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f,%" PRIu64,perTillNow,reconstructedSeqNo);
-				break;
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
+		reconstructedSeqNo=perPktData->reportDataPointer!=NULL ? 
+			perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:
+			-1;
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,reconstructedSeqNo);
+	}
 
-			default:
-				break;
-		}
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
+		// perPktData->reportDataPointer->minLatency contains the current maximum measured latency (at the end of the test will contain the global test maximum)
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->minLatency : -1);
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
+		// perPktData->reportDataPointer->minLatency contains the current minimum measured latency (at the end of the test will contain the global test minimum)
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->maxLatency : -1);
 	}
 
 	dprintf_ret_val+=dprintf(Tfiledescriptor,"\n");
