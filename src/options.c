@@ -1086,8 +1086,8 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		print_short_info_err(options);
 	}
 
-	if(options->overwrite==1 && options->filename==NULL) {
-		fprintf(stderr,"Error: '-o' (overwrite mode) can be specified only when the output to a file (with -f) is requested.\n");
+	if(options->overwrite==1 && options->filename==NULL && options->Wfilename==NULL) {
+		fprintf(stderr,"Error: '-o' (overwrite mode) can be specified only when the output to a file (with -f or -W) is requested.\n");
 		print_short_info_err(options);
 	}
 

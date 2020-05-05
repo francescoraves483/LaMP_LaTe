@@ -84,7 +84,7 @@ void reportSetTimeoutOccurred(reportStructure *report);
 void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
-int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_data);
+int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data);
 int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData);
 void closeTfile(int Tfilepointer);
 
