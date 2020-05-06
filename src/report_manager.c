@@ -468,7 +468,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	return printOpErrStatus;
 }
 
-int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_data) {
+int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data) {
 	int csvfd;
 	char *Tfilename_fileno;
 
@@ -478,8 +478,11 @@ int openTfile(const char *Tfilename,int followup_on_flag, char enabled_extra_dat
 		return -2;
 	}
 
-	csvfd=open(Tfilename, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
-
+	if(overwrite) {
+		csvfd=open(Tfilename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
+	} else {
+		csvfd=open(Tfilename, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+	}
 	if(csvfd<0) {
 		if(errno==EEXIST) {
 			// File already exists
