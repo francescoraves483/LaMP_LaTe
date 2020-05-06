@@ -220,45 +220,41 @@ static void print_long_info(void) {
 			"\n"
 
 		"[options] - Optional client options:\n"
+			// General options
 			OPT_n_client
+			OPT_p_both
+			OPT_r_both
 			OPT_t_client
-			OPT_R_client
+			OPT_A_both
+			OPT_C_client
+			OPT_F_client
+			OPT_L_client
+			OPT_P_client
+			OPT_R_client	
+			OPT_T_client
+			OPT_V_both
+
+			// File options
 			OPT_f_client
 			OPT_o_client
-			OPT_P_client
-			OPT_r_both
-			OPT_A_both
-			OPT_L_client
+			OPT_w_both
+			"\t  This options applies to a client only in ping-like mode.\n"
+			OPT_y_both
+			OPT_W_both
+			"\t  This options applies to a client only in ping-like mode.\n"
+			OPT_X_both
 
+			// Interface options
+			OPT_e_both
 			OPT_I_both
 			#if AMQP_1_0_ENABLED
 			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 			#endif
-
-			OPT_e_both
 			OPT_N_both
-
 			OPT_S_both
 			#if AMQP_1_0_ENABLED
 			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 			#endif
-
-			OPT_p_both
-			OPT_C_client
-			OPT_F_client
-			OPT_T_client
-
-			OPT_W_both
-			"\t  This options applies to a client only in ping-like mode.\n"
-
-			OPT_y_both
-
-			OPT_V_both
-
-			OPT_w_both
-			"\t  This options applies to a client only in ping-like mode.\n"
-
-			OPT_X_both
 			"\n"
 
 		"[options] - Mandatory server options:\n"
@@ -270,30 +266,36 @@ static void print_long_info(void) {
 			"\n"
 
 		"[options] - Optional server options:\n"
-			OPT_t_server
-			OPT_r_both
-			OPT_A_both
+			// General options
 			OPT_d_server
-			OPT_L_server
-			OPT_I_both
-			OPT_e_both
-			OPT_N_both
-			OPT_S_both
 			OPT_p_both
+			OPT_r_both
+			OPT_t_server
+			OPT_A_both
+			OPT_L_server
+			OPT_V_both
 			OPT_0_server
 			OPT_1_server
 
-			OPT_W_both
-			"\t  This options applies to a server only in unidirectional mode.\n"
-
-			OPT_y_both
-
-			OPT_V_both
-
+			// File options
 			OPT_w_both
 			"\t  This options applies to a server only in unidirectional mode.\n"
-
+			OPT_y_both
+			OPT_W_both
+			"\t  This options applies to a server only in unidirectional mode.\n"
 			OPT_X_both
+
+			// Interface options
+			OPT_e_both
+			OPT_I_both
+			#if AMQP_1_0_ENABLED
+			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+			#endif
+			OPT_N_both
+			OPT_S_both
+			#if AMQP_1_0_ENABLED
+			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+			#endif
 			"\n"
 
 		"Example of usage:\n"
