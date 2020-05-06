@@ -2,6 +2,7 @@
 #define LATENCYTEST_OPTIONS_H_INCLUDED
 
 #include <stdint.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include "rawsock_lamp.h" // In order to import the definition of protocol_t
 #include "math_utils.h"
@@ -10,9 +11,9 @@
 // Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
 // If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmoyp:reX:A:BC:FM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:X:A:BC:FM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmoyp:req:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:q:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -32,6 +33,7 @@
 #define CLIENT_SRCPORT 46772
 
 #define DEFAULT_LATE_PORT 46000
+#define DEFAULT_W_SOCKET_PORT 46001
 #define MAX_PAYLOAD_SIZE_UDP_LAMP 1448 // Set to 1448 B since: 20 B (IP hdr) + 8 B (UDP hdr) + 24 B (LaMP hdr) + 1448 B (payload) = 1500 B (MTU)
 #define RAW_RX_PACKET_BUF_SIZE (ETHERMTU+14) // Ethernet MTU (1500 B) + 14 B of struct ether_header
 #define MIN_TIMEOUT_VAL_S 1000 // Minimum timeout value for the server (in ms)
@@ -63,6 +65,11 @@
 
 // Default batch size when using a random interval (each batch will have the same interval between packets)
 #define BATCH_SIZE_DEF 10
+
+// Maximum supported length of the string specified after -w (with, in the worst case, IP:port,interface)
+// The size has been set to 12 (IP digits) + 3 ('.' in an IP address) + 5 (a maximum of 5 digits for the port are supported) + 
+// two special chacters (':' and ',') + IFNAMSIZ (which takes into account the maximum interface name size + '\0')
+#define MAX_w_STRING_SIZE (22+IFNAMSIZ)
 
 // Char <-> shift mapping for SET_REPORT_EXTRA_DATA_BIT
 // To use SET_REPORT_EXTRA_DATA_BIT() you should specify the report_extra_data variable and one of these macros
@@ -169,6 +176,14 @@ struct options {
 	// -X a will set all the bits to 1
 	// All the reserved bits are ignored, no matter the value they assume
 	uint16_t report_extra_data;
+
+	// -w UDP socket parameters
+	struct _udp_params {
+		uint16_t port;
+		struct in_addr ip_addr;
+		char *devname;
+		int enabled;
+	} udp_params;
 };
 
 void options_initialize(struct options *options);

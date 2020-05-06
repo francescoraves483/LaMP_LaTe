@@ -18,7 +18,163 @@
 #define TX_STR ".tx"
 #define RX_STR ".rx"
 
+// Macros to perform stringizing: STRINGIFY(MACRO) will convert the macro expansion of MACRO into a proper string
+#define STRINGIFY(value) STR(value)
+#define STR(value) #value
+
+// Option strings: defined here the description for each option to be then included inside print_long_info()
+#define OPT_M_client \
+	"  -M <destination MAC address>: specifies the destination MAC address.\n" \
+	"\t  Mandatory only if socket is RAW ('-r' is selected) and protocol is UDP.\n"
+#define OPT_q_client \
+	"  -q <queue name>: name of an AMQP queue or topic (prepend with topic://) to be used. Client and server\n" \
+	"\t  shall use the same queue name. This options applies only when AMQP 1.0 is used as a protocol.\n" \
+	"\t  Two queues will be created: one for producer-to-consumer communication (.tx will be appended) and\n" \
+	"\t  one from consumer-to-producer communication (.rx will be appended.\n"
+#define OPT_n_client \
+	"  -n <total number of packets to be sent>: specifies how many packets to send (default: "STRINGIFY(CLIENT_DEF_NUMBER)").\n"
+#define OPT_t_client \
+	"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: "STRINGIFY(CLIENT_DEF_INTERVAL)" ms).\n"
+#define OPT_R_client \
+	"  -R <random interval distrbution string>: allows the user to select a random periodicity, between\n" \
+	"\t  the packets which will be sent, instead of using a fixed one (i.e. instead of sending exactly\n" \
+	"\t  one packet every '-t' milliseconds). As argument, a string is expected, which should have the\n" \
+	"\t  following format: <random distribution type character><distrbution parameter>,<optional batch size>\n" \
+	"\t    <random distrbution type character>: can be 'u' for uniform, 'U' for improved uniform (no modulo\n" \
+	"\t      bias but may cause an increase processing time when selecting a new random interval), 'e' for\n" \
+	"\t      exponential, 'n' for a truncated normal between 1 ms and 2*<-t value>-1 ms\n" \
+	"\t    <distribution parameter>: it represents the lower limit to select random numbers from for 'u' and 'U',\n" \
+	"\t      the distribution mean for 'e' and the standard deviation for 'n'\n" \
+	"\t    <optional batch size>: the optional batch size, separated from the rest of the string, is optional and\n" \
+	"\t      it can be used to select how many packets should be sent before selecting a new random interval; if\n" \
+	"\t      not specified, "STRINGIFY(BATCH_SIZE_DEF)" packets will be sent with a given random periodicity, before moving to a new random\n" \
+	"\t      value of the periodicity itself. Using a value of '1' means that each packet will be sent after a\n" \
+	"\t      randomly selected amount of time.\n" \
+	"\t  When using -R, the value after -t will also assume a different meaning, in particular:\n" \
+	"\t    -the upper limit to select random numbers from, for 'u' and 'U'\n" \
+	"\t    -the distribution location parameter (i.e. its \"starting point\"), for 'e'\n" \
+	"\t    -the distribution mean, for 'n'\n" \
+	"\t  Examples:\n" \
+	"\t  uniform with a lower limit of 10 ms and an upper limit of 100 ms (batch size: default): -t 100 -R u10\n" \
+	"\t  uniform, as before, but with a batch size of 20 packets: -t 100 -R u10,20\n" \
+	"\t  truncated normal between 1 ms and 399 ms, mean: 200 ms, std dev: 4 ms, batch: 15: -t 200 -R n4,15\n"
+#define OPT_f_client \
+	"  -f <filename, without extension>: print the report to a CSV file other than printing\n" \
+	"\t  it on the screen.\n" \
+	"\t  The default behaviour will append to an existing file; if the file does not exist,\n" \
+	"\t  it is created.\n"
+#define OPT_o_client \
+	"  -o: valid only with '-f'; instead of appending to an existing file, overwrite it.\n"
+#define OPT_y_both \
+	"  -y: valid only with '-W': instead of creating new CSV files when the specified one already exists, just\n" \
+	"\t  overwrite it.\n"
+#define OPT_P_client \
+	"  -P <payload size in B>: specify a LaMP payload length, in bytes, to be included inside\n" \
+	"\t  the packet (default: 0 B).\n"
+#define OPT_r_both \
+	"  -r: use raw sockets, if supported for the current protocol.\n" \
+	"\t  When '-r' is set, the program tries to insert the LaMP timestamp in the last \n" \
+	"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
+#define OPT_A_both \
+	"  -A <access category: BK | BE | VI | VO>: forces a certain EDCA MAC access category to\n" \
+	"\t  be used (patched kernel required!).\n"
+#define OPT_L_client \
+	"  -L <latency type: u | r | s | h>: select latency type: user-to-user, KRT (Kernel Receive Timestamp),\n" \
+	"\t  software kernel transmit and receive timestamps (only when supported by the NIC) or hardware\n" \
+	"\t  timestamps (only when supported by the NIC)\n" \
+	"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
+#define OPT_I_both \
+	"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n" \
+	"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
+#define OPT_e_both \
+	"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n" \
+	"\t  look for available wireless interfaces and return an error if none are found.\n"
+#define OPT_N_both \
+	"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
+#define OPT_S_both \
+	"  -S <interface name>: instead of automatically looking for available interfaces, use a specific interface\n" \
+	"\t  which name is specified after this option. The suggestion is to rely on this option only when an interface\n" \
+	"\t  is not listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
+#define OPT_p_both \
+	"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: "STRINGIFY(DEFAULT_LATE_PORT)") or AMQP.\n"
+#define OPT_C_client \
+	"  -C <confidence interval mask>: specifies an integer (mask) telling the program which confidence\n" \
+	"\t  intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99\n" \
+	"\t  7=.90/.95/.99 (default: "STRINGIFY(DEF_CONFIDENCE_INTERVAL_MASK)").\n"
+#define OPT_F_client \
+	"  -F: enable the LaMP follow-up mechanism. At the moment only the ping-like mode is supporting this.\n" \
+	"\t  This mechanism will send an additional follow-up message after each server reply, containing an\n" \
+	"\t  estimate of the server processing time, which is computed depending on the chosen latency type.\n"
+#define OPT_T_client \
+	"  -T <time in ms>: Manually set a client timeout. The client timeout is always computed as:\n" \
+	"\t  ("STRINGIFY(MIN_TIMEOUT_VAL_C)" + x) ms if |-t value| <= "STRINGIFY(MIN_TIMEOUT_VAL_C)" ms or (|-t value| + x) ms if |-t value| > "STRINGIFY(MIN_TIMEOUT_VAL_C)" ms; with -T you can\n" \
+	"\t  set the 'x' value, in ms (default: " STRINGIFY(CLIENT_DEF_TIMEOUT)")\n"
+#define OPT_W_both \
+	"  -W <filename, without extension>: write, for the current test only, the single packet latency\n" \
+	"\t  measurement data to the specified CSV file.\n" \
+	"\t  When this option is specified LaTe wull check if the specified .csv file already exists. If yes,\n" \
+	"\t  it will try to create a new file with name <filename>_0001.csv. If also this file is already existing\n" \
+    "\t  it will try to create <filename>_0002.csv, and so on, until 9999 attemps are performed. When all the\n" \
+    "\t  available attempts have been performed, it will simply append to <filename>.csv.\n" \
+	"\t  Warning! This option may negatively impact performance.\n"
+#define OPT_V_both \
+		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n" \
+		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n" \
+		"\t  when this mode is activated.\n"
+#define OPT_w_both \
+	"  -w <IPv4:port>: output per-packet data, just like -W for a CSV file, to a UDP socket, which can then be read by\n" \
+	"\t  any other application for further processing. To improve usability, the data is sent towards the selected IPv4\n" \
+	"\t  and port in a textual, CSV-like human-readable format.\n" \
+	"\t  When no port is specified, "STRINGIFY(DEFAULT_W_SOCKET_PORT)" will be used.\n" \
+	"\t  After <IPv4:port>, it is possibile to specify an interface, through its name, to bind the socket to, for instance:\n" \
+	"\t  '-w 192.168.1.101:46001,enp2s0'; if no interface is specified, the socket will be bound to all interfaces.\n"
+#define OPT_X_both \
+	"  -X: when -W/-w is specified, it is possible to print extra single packet information by specifying some characters\n" \
+	"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n" \
+	"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n" \
+	"\t  when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n" \
+	"\t  up to the current packet and 'n' will print the minimum measured value up to the current packet.\n" \
+	"\t  'a' can be used as a shortcut to print all the available information.\n" \
+	"\t  This option is valid only when -W or -w (or both) is selected.\n"
+#define OPT_H_server \
+	"  -H: specify the address of the AMQP 1.0 broker.\n"
+#define OPT_t_server \
+	"  -t <timeout in ms>: specifies the timeout after which the connection should be\n" \
+	"\t  considered lost (minimum value: "STRINGIFY(MIN_TIMEOUT_VAL_S)" ms, otherwise "STRINGIFY(MIN_TIMEOUT_VAL_S)" ms will be automatically set - default: "STRINGIFY(SERVER_DEF_TIMEOUT)" ms).\n"
+#define OPT_d_server \
+	"  -d: set the server in 'continuous daemon mode': as a session is terminated, the server\n" \
+	"\t  will be restarted and will be able to accept new packets from other clients.\n"
+#define OPT_L_server \
+	"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n" \
+	"\t  Default: u. Please note that the server supports this parameter only when in unidirectional mode.\n" \
+	"\t  If a bidirectional INIT packet is received, the mode is completely ignored.\n"
+#define OPT_0_server \
+	"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
+#define OPT_1_server \
+	"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n" \
+	"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n" \
+	"\t  'printf' is called before sending a reply.\n"
+
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
+
+// Safer implementation of strchr for the -w option, reading up to the maximum expected number of characters in -w (i.e. MAX_w_STRING_SIZE)
+static int strchr_w_opt(char *str, size_t str_len, char character) {
+	int found=0;
+
+	if(str==NULL || str_len<=0) {
+		return -1;
+	}
+
+	// Look for the character inside the string, looking at a maximum of MAX_w_STRING_SIZE characters, or up to str_len, or up to a '\0'
+	for(int i=0;i<MAX_w_STRING_SIZE && str[i]!='\0' && i<str_len;i++) {
+		if(str[i]==character) {
+			found=1;
+			break;
+		}
+	}
+
+	return found;
+}
 
 static void print_long_info(void) {
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
@@ -57,146 +213,88 @@ static void print_long_info(void) {
 		"\n"
 
 		"[options] - Mandatory client options:\n"
-		"  -M <destination MAC address>: specifies the destination MAC address.\n"
-		"\t  Mandatory only if socket is RAW ('-r' is selected) and protocol is UDP.\n"
-		#if AMQP_1_0_ENABLED
-		"  -q <queue name>: name of an AMQP queue or topic (prepend with topic://) to be used. Client and server\n"
-		"\t  shall use the same queue name. This options applies only when AMQP 1.0 is used as a protocol.\n"
-		"\t  Two queues will be created: one for producer-to-consumer communication (.tx will be appended) and\n"
-		"\t  one from consumer-to-producer communication (.rx will be appended.\n"
-		#endif
-		"\n"
+			OPT_M_client
+			#if AMQP_1_0_ENABLED
+			OPT_q_client
+			#endif
+			"\n"
 
 		"[options] - Optional client options:\n"
-		"  -n <total number of packets to be sent>: specifies how many packets to send (default: %d).\n"
-		"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: %d ms).\n"
-		"  -R <random interval distrbution string>: allows the user to select a random periodicity, between\n"
-		"\t  the packets which will be sent, instead of using a fixed one (i.e. instead of sending exactly\n"
-		"\t  one packet every '-t' milliseconds). As argument, a string is expected, which should have the\n"
-		"\t  following format: <random distribution type character><distrbution parameter>,<optional batch size>\n"
-		"\t    <random distrbution type character>: can be 'u' for uniform, 'U' for improved uniform (no modulo\n"
-		"\t      bias but may cause an increase processing time when selecting a new random interval), 'e' for\n"
-		"\t      exponential, 'n' for a truncated normal between 1 ms and 2*<-t value>-1 ms\n"
-		"\t    <distribution parameter>: it represents the lower limit to select random numbers from for 'u' and 'U',\n"
-		"\t      the distribution mean for 'e' and the standard deviation for 'n'\n"
-		"\t    <optional batch size>: the optional batch size, separated from the rest of the string, is optional and\n"
-		"\t      it can be used to select how many packets should be sent before selecting a new random interval; if\n"
-		"\t      not specified, %d packets will be sent with a given random periodicity, before moving to a new random\n"
-		"\t      value of the periodicity itself. Using a value of '1' means that each packet will be sent after a\n"
-		"\t      randomly selected amount of time.\n"
-		"\t  When using -R, the value after -t will also assume a different meaning, in particular:\n"
-		"\t    -the upper limit to select random numbers from, for 'u' and 'U'\n"
-		"\t    -the distribution location parameter (i.e. its \"starting point\"), for 'e'\n"
-		"\t    -the distribution mean, for 'n'\n"
-		"\t  Examples:\n" 
-		"\t  uniform with a lower limit of 10 ms and an upper limit of 100 ms (batch size: default): -t 100 -R u10\n"
-		"\t  uniform, as before, but with a batch size of 20 packets: -t 100 -R u10,20\n"
-		"\t  truncated normal between 1 ms and 399 ms, mean: 200 ms, std dev: 4 ms, batch: 15: -t 200 -R n4,15\n"
-		"  -f <filename, without extension>: print the report to a CSV file other than printing\n"
-		"\t  it on the screen.\n"
-		"\t  The default behaviour will append to an existing file; if the file does not exist,\n" 
-		"\t  it is created.\n"
-		"  -o: valid only with '-f'; instead of appending to an existing file, overwrite it.\n"
-		"  -P <payload size in B>: specify a LaMP payload length, in bytes, to be included inside\n"
-		"\t  the packet (default: 0 B).\n"
-		"  -r: use raw sockets, if supported for the current protocol.\n"
-		"\t  When '-r' is set, the program tries to insert the LaMP timestamp in the last \n"
-		"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
-		"  -A <access category: BK | BE | VI | VO>: forces a certain EDCA MAC access category to\n"
-		"\t  be used (patched kernel required!).\n"
-		"  -L <latency type: u | r | s | h>: select latency type: user-to-user, KRT (Kernel Receive Timestamp),\n"
-		"\t  software kernel transmit and receive timestamps (only when supported by the NIC) or hardware\n"
-		"\t  timestamps (only when supported by the NIC)\n"
-		"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
-		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
-		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
-		#if AMQP_1_0_ENABLED
-		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
-		#endif
-		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
-		"\t  look for available wireless interfaces and return an error if none are found.\n"
-		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
-		"  -S <interface name>: instead of automatically looking for available interfaces, use a specific interface\n"
-		"\t  which name is specified after this option. The suggestion is to rely on this option only when an interface\n"
-		"\t  is not listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
-		#if AMQP_1_0_ENABLED
-		"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
-		#endif
-		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
-		"  -C <confidence interval mask>: specifies an integer (mask) telling the program which confidence\n"
-		"\t  intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99\n"
-		"\t  7=.90/.95/.99 (default: %d).\n"
-		"  -F: enable the LaMP follow-up mechanism. At the moment only the ping-like mode is supporting this.\n"
-		"\t  This mechanism will send an additional follow-up message after each server reply, containing an\n"
-		"\t  estimate of the server processing time, which is computed depending on the chosen latency type.\n"
-		"  -T <time in ms>: Manually set a client timeout. The client timeout is always computed as:\n"
-		"\t  (%d + x) ms if |-t value| <= %d ms or (|-t value| + x) ms if |-t value| > %d ms; with -T you can\n"
-		"\t  set the 'x' value, in ms (default: %d)\n"
-		"  -W <filename, without extension>: write, for the current test only, the single packet latency\n"
-		"\t  measurement data to the specified CSV file. If the file already exists, data will be appended\n"
-		"\t  to the file, with a new header line. Warning! This option may negatively impact performance.\n"
-		"\t  This options applies to a client only in ping-like mode.\n"
-		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
-		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
-		"\t  when this mode is activated.\n"
-		"  -X: when -W is specified, it is possible to print extra single packet information by specifying some characters\n"
-		"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
-		"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n"
-		"\t   when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n"
-		"\t   up to the current packet and 'n' will print the minimum measured value up to the current packet.\n"
-		"\t   'a' can be used as a shortcut to print all the available information.\n"
-		"\t   This option is valid only when -W is selected.\n"
-		"\n"
+			OPT_n_client
+			OPT_t_client
+			OPT_R_client
+			OPT_f_client
+			OPT_o_client
+			OPT_P_client
+			OPT_r_both
+			OPT_A_both
+			OPT_L_client
+
+			OPT_I_both
+			#if AMQP_1_0_ENABLED
+			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+			#endif
+
+			OPT_e_both
+			OPT_N_both
+
+			OPT_S_both
+			#if AMQP_1_0_ENABLED
+			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+			#endif
+
+			OPT_p_both
+			OPT_C_client
+			OPT_F_client
+			OPT_T_client
+
+			OPT_W_both
+			"\t  This options applies to a client only in ping-like mode.\n"
+
+			OPT_y_both
+
+			OPT_V_both
+
+			OPT_w_both
+			"\t  This options applies to a client only in ping-like mode.\n"
+
+			OPT_X_both
+			"\n"
 
 		"[options] - Mandatory server options:\n"
-		#if AMQP_1_0_ENABLED
-		"  -H: specify the address of the AMQP 1.0 broker.\n"
-		#else
-		"   <none>"
-		#endif
-		"\n"
+			#if AMQP_1_0_ENABLED
+			OPT_H_server
+			#else
+			"   <none>"
+			#endif
+			"\n"
 
 		"[options] - Optional server options:\n"
-		"  -t <timeout in ms>: specifies the timeout after which the connection should be\n"
-		"\t  considered lost (minimum value: %d ms, otherwise %d ms will be automatically set - default: %d ms).\n"
-		"  -r: use raw sockets, if supported for the current protocol.\n"
-		"\t  When '-r' is set, the program tries to insert the LaMP timestamp in the last \n"
-		"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
-		"  -A <access category: BK | BE | VI | VO>: forces a certain EDCA MAC access category to\n"
-		"\t  be used (patched kernel required!).\n"
-		"  -d: set the server in 'continuous daemon mode': as a session is terminated, the server\n"
-		"\t  will be restarted and will be able to accept new packets from other clients.\n"
-		"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n"
-		"\t  Default: u. Please note that the server supports this parameter only when in unidirectional mode.\n"
-		"\t  If a bidirectional INIT packet is received, the mode is completely ignored.\n"
-		"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n"
-		"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
-		"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n"
-		"\t  look for available wireless interfaces and return an error if none are found.\n"
-		"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
-		"  -S <interface name>: instead of automatically looking for available interfaces, use a specific interface\n"
-		"\t  which name is specified after this option. The suggestion is to rely on this option only when an interface\n"
-		"\t  is not listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
-		"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: %d) or AMQP.\n"
-		"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
-		"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n"
-		"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n"
-		"\t  'printf' is called before sending a reply.\n"
-		"  -W <filename, without extension>: write, for the current test only, the single packet latency\n"
-		"\t  measurement data to the specified CSV file. If the file already exists, data will be appended\n"
-		"\t  to the file, with a new header line. Warning! This option may negatively impact performance.\n"
-		"\t  This options applies to a server only in unidirectional mode.\n"
-		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n"
-		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n"
-		"\t  when this mode is activated.\n"
-		"  -X: when -W is specified, it is possible to print extra single packet information by specifying some characters\n"
-		"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n"
-		"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n"
-		"\t   when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n"
-		"\t   up to the current packet and 'n' will print the minimum measured value up to the current packet.\n"
-		"\t   'a' can be used as a shortcut to print all the available information.\n"
-		"\t   This option is valid only when -W is selected.\n"
-		"\n"
+			OPT_t_server
+			OPT_r_both
+			OPT_A_both
+			OPT_d_server
+			OPT_L_server
+			OPT_I_both
+			OPT_e_both
+			OPT_N_both
+			OPT_S_both
+			OPT_p_both
+			OPT_0_server
+			OPT_1_server
+
+			OPT_W_both
+			"\t  This options applies to a server only in unidirectional mode.\n"
+
+			OPT_y_both
+
+			OPT_V_both
+
+			OPT_w_both
+			"\t  This options applies to a server only in unidirectional mode.\n"
+
+			OPT_X_both
+			"\n"
 
 		"Example of usage:\n"
 		"Non-RAW sockets and UDP:\n"
@@ -218,12 +316,6 @@ static void print_long_info(void) {
 		"The source code is available at:\n"
 		"%s\n",
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Basic help
-		CLIENT_DEF_NUMBER, // Optional client options
-		CLIENT_DEF_INTERVAL, // Optional client options
-		BATCH_SIZE_DEF, // Optional client options
-		DEFAULT_LATE_PORT,DEF_CONFIDENCE_INTERVAL_MASK,MIN_TIMEOUT_VAL_C,MIN_TIMEOUT_VAL_C,MIN_TIMEOUT_VAL_C,CLIENT_DEF_TIMEOUT, // Optional client options
-		MIN_TIMEOUT_VAL_S,MIN_TIMEOUT_VAL_S,SERVER_DEF_TIMEOUT, // Optional server options
-		DEFAULT_LATE_PORT, // Optional server options
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT, // Example of usage
 		DEFAULT_LATE_PORT,CLIENT_DEF_NUMBER,CLIENT_DEF_INTERVAL,PROG_NAME_SHORT, // Example of usage
 		DEFAULT_LATE_PORT,SERVER_DEF_TIMEOUT,PROG_NAME_SHORT, // Example of usage
@@ -315,6 +407,11 @@ void options_initialize(struct options *options) {
 	options->rand_batch_size=BATCH_SIZE_DEF;
 
 	options->report_extra_data=0; // No valid char specified when initializing the options structure
+
+	// Initializing udp_params
+	options->udp_params.port=DEFAULT_W_SOCKET_PORT;
+	options->udp_params.devname=NULL;
+	options->udp_params.enabled=0;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -532,6 +629,91 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			case 'v':
 				fprintf(stdout,"%s, version %s, date %s\n",PROG_NAME_LONG,VERSION,DATE);
 				v_flag=1;
+				break;
+
+			case 'w':
+				{
+				char *str_ptr;
+				int opt_devnameLen=0;
+				char *saveptr_strtok=NULL;
+				uint8_t specified_fields=0x00;
+				size_t optargLen=0;
+				long port_long;
+
+				// Check if the specified string has a valid size (it should contain at least an IP address, i.e. a minimum of 7 characters + '\0' in the worst case, and
+				// it should be shorter than MAX_w_STRING_SIZE, as defined in options.h)
+				optargLen=strlen(optarg)+1;
+
+				if(optargLen<8 || optargLen>MAX_w_STRING_SIZE) {
+					fprintf(stderr,"Error: the argument specified after -w is either too short or too long. Size: %zu, admitted sizes: [7,%d].\n",optargLen-1,MAX_w_STRING_SIZE-1);
+					fprintf(stderr,"If you specified an interface name, please check if it is correct.\n");
+					print_short_info_err(options);
+				}
+
+				// Check if an interface is specified directly after the IP address (i.e. a ',' is encountered instead of ':',
+				// which is used to separate the port from the IP address)
+				// In order to do so, we discriminate different cases setting different bits of specified_fields:
+				// 1) If at least one ':' is found, we can infer that the port has been specified (set bit 1 in specified_fields)
+				// 2) If one ',' is found, we can infer that an interface name has been specified (set bit 2 in specified_fields)
+				// If both bits are set, we can conclude that both port and interface name were specified (both bit 1 and bit 2 are set)
+				if(strchr_w_opt(optarg,optargLen,':')) {
+					specified_fields |= 0x01;
+				}
+
+				if(strchr_w_opt(optarg,optargLen,',')) {
+					specified_fields |= 0x02;
+				}
+
+				str_ptr=strtok_r(optarg,":,",&saveptr_strtok);
+
+				// Parse IP addresss
+				if(str_ptr==NULL || inet_pton(AF_INET,str_ptr,&(options->udp_params.ip_addr))!=1) {
+					fprintf(stderr,"Error in parsing the destination IP address for the UDP socket (-w option).\n");
+					print_short_info_err(options);
+				}
+				
+				// If bit 1 in specified_fields is set, parse port number
+				if(specified_fields & 0x01) {
+					str_ptr=strtok_r(NULL,":,",&saveptr_strtok);
+
+					if(str_ptr!=NULL) {
+						if(sscanf(str_ptr,"%ld",&port_long)!=1 || port_long<1 || port_long>65535) {
+							fprintf(stderr,"Error in parsing the port for the UDP socket (-w option). Bad value?\n");
+							print_short_info_err(options);
+						}
+						options->udp_params.port=(uint16_t) port_long;
+					}
+				}
+
+				// If bit 2 in specified_fields is set, parse the interface name
+				if(specified_fields & 0x02) {
+					str_ptr=strtok_r(NULL,":,",&saveptr_strtok);
+
+					if(str_ptr!=NULL) {
+						opt_devnameLen=strlen(str_ptr)+1;
+						if(opt_devnameLen>1) {
+							options->udp_params.devname=malloc(opt_devnameLen*sizeof(char));
+							if(!options->udp_params.devname) {
+								fprintf(stderr,"Error in parsing the interface name for the UDP socket (-w option): cannot allocate memory.\n");
+								fprintf(stderr,"If this error persists, try not specifying any interface and bind to all the available ones.\n");
+								print_short_info_err(options);
+							}
+							strncpy(options->udp_params.devname,str_ptr,opt_devnameLen);
+						} else {
+							fprintf(stderr,"Error in parsing the interface name for the UDP socket (-w option): null string length.\n");
+							print_short_info_err(options);
+						}
+					}
+				}
+
+				fprintf(stdout,"[TBR] specified_fields: %02X - IP: %s, port: %" PRIu16 ", devname=%s\n",
+					specified_fields,
+					inet_ntoa(options->udp_params.ip_addr),options->udp_params.port,
+					options->udp_params.devname==NULL?"(null)":options->udp_params.devname);
+
+				options->udp_params.enabled=1;
+
+				}
 				break;
 
 			#if AMQP_1_0_ENABLED
@@ -1181,6 +1363,10 @@ void options_free(struct options *options) {
 
 	if(options->Wfilename) {
 		free(options->Wfilename);
+	}
+
+	if(options->udp_params.enabled==1 && options->udp_params.devname) {
+		free(options->udp_params.devname);
 	}
 
 	#if AMQP_1_0_ENABLED
