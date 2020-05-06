@@ -477,7 +477,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	// Open CSV file when '-W' is specified (as this only applies to the unidirectional mode, no file is create when the mode is not unidirectional)
 	if(opts->Wfilename!=NULL && mode_session==UNIDIR) {
-		Wfiledescriptor=openTfile(opts->Wfilename,opts->overwrite,opts->followup_mode!=FOLLOWUP_OFF,opts->report_extra_data);
+		Wfiledescriptor=openTfile(opts->Wfilename,opts->overwrite_W,opts->followup_mode!=FOLLOWUP_OFF,opts->report_extra_data);
 		if(Wfiledescriptor<0) {
 			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
 		}

@@ -280,6 +280,7 @@ void options_initialize(struct options *options) {
 
 	options->filename=NULL;
 	options->overwrite=0;
+	options->overwrite_W=0;
 
 	options->opt_devname=NULL;
 
@@ -517,6 +518,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 			case 'o':
 				options->overwrite=1;
+				break;
+
+			case 'y':
+				options->overwrite_W=1;
 				break;
 
 			case 'e':
@@ -1088,6 +1093,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 	if(options->overwrite==1 && options->filename==NULL && options->Wfilename==NULL) {
 		fprintf(stderr,"Error: '-o' (overwrite mode) can be specified only when the output to a file (with -f or -W) is requested.\n");
+		print_short_info_err(options);
+	}
+
+	if(options->overwrite_W==1 && options->Wfilename==NULL) {
+		fprintf(stderr,"Error: '-y' (overwrite mode for -W files) can be specified only when the output to a file (with -W) is requested.\n");
 		print_short_info_err(options);
 	}
 

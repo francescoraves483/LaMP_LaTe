@@ -6,10 +6,13 @@
 #include "rawsock_lamp.h" // In order to import the definition of protocol_t
 #include "math_utils.h"
 
+// Valid options
+// Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
+// If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmop:reX:A:BC:FM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:reX:A:BC:FM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmop:req:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:req:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -128,6 +131,7 @@ struct options {
 	int macUP;
 	char *filename; // Filename for the -f mode
 	uint8_t overwrite; // In '-f' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not append to existing file), otherwise it will be = 0 (default = 0)
+	uint8_t overwrite_W; // In '-W' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not create new files when a CSV file already exists), otherwise it will be = 0 (default = 0)
 	char *opt_devname; // Interface name for the -S mode
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (KRT, gettimeofday()+ancillary data), 'h' (hardware timestamps when supported)

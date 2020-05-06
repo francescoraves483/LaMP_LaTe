@@ -345,7 +345,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 				"lastSeqNumber,"
 				"lastSeqNumber-reconstructed-noncyclical,"
 				"LostPacketLastSeq-Perc,"
-				"reportingSuccessfull,"
+				"reportingSuccessful,"
 				"ConfInt90l,"
 				"ConfInt90u,"
 				"ConfInt95l,"
@@ -408,7 +408,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%" PRIu16 ","			// last sequence number
 			"%" PRIu64 ","			// last sequence number (non cyclical, reconstructed)
 			"%.2f,"					// lost packets up to last sequence number (perc)
-			"%d,",					// reportingSuccessfull (= 1 if everything is ok, = 0 if a reporting error occurred)
+			"%d,",					// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
 			opts->number,																											// total number of packets requested
@@ -430,7 +430,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			report->lastSeqNumber,																									// last sequence number
 			(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,																// last sequence number (non cyclical, reconstructed)
 			lostPktPercLastSeqNo,																									// lost packets up to last sequence number (perc)																						
-			report->minLatency!=UINT64_MAX);																						// reportingSuccessfull (= 1 if everything is ok, = 0 if a reporting error occurred)
+			report->minLatency!=UINT64_MAX);																						// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
 		
 		// Save confidence intervals data (if a confidence interval is negative, limit it to 0, as real latency cannot be negative)
 		// Do this only if there is actually data in the report (i.e. if at least one packet has been received - if no packets have
@@ -483,9 +483,11 @@ int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, ch
 	} else {
 		csvfd=open(Tfilename, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
 	}
+
 	if(csvfd<0) {
 		if(errno==EEXIST) {
 			// File already exists
+			// When overwrite==1 we never expect to reach this point
 			// Try to create a new file, appending an increasing number after <Tfilename>, until W_MAX_FILE_NUMBER attemps are reached
 			int fileno=1;
 			int fileopendone=0;
