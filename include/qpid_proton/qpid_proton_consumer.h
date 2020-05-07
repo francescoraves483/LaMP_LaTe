@@ -14,6 +14,6 @@ typedef enum {
 	C_ACKRECEIVED
 } consumer_status_t;
 	
-unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts);
+unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, udp_sock_data_t *udp_w_data);
 
 #endif

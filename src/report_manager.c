@@ -8,6 +8,8 @@
 #include <time.h>
 #include <math.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
+#include <linux/if.h>
 
 // Condidence interval array sizes
 #define TSTUDSIZE90 125
@@ -23,6 +25,19 @@
 
 // First number after UINT16_MAX (i.e. 65536 = 2^16, used for sequence number reconstruction after cyclical resets)
 #define UINT16_TOP (UINT16_MAX+1)
+
+// Macros for extra fields printing in writeToTFile() and writeToUDPSocket()
+#define compute_reconstructedSeqNo(perPktData) perPktData->reportDataPointer!=NULL ? \
+			perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo: \
+			-1
+
+#define compute_perTillNow(perPktData) perPktData->reportDataPointer!=NULL ? \
+			((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) : \
+			-1
+
+#define compute_minLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)(perPktData->reportDataPointer->minLatency)/1000 : -1
+
+#define compute_maxLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)perPktData->reportDataPointer->maxLatency/1000 : -1
 
 // Static function to compute ts, to be used to compute the confidence intervals
 /* 	It tries to emulate functions such as MATLAB's tinv(), but without inverting the Student's T cumulative distribution,
@@ -554,6 +569,54 @@ int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, ch
 	return csvfd;
 }
 
+int openUDPSocket(udp_sock_data_t *sock_data,struct options *opts) {
+	struct sockaddr_in bind_addrin;
+	struct ifreq ifreq;
+
+	if(!opts->udp_params.enabled) {
+		return -3;
+	}
+
+	sock_data->descriptor=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+
+    if(sock_data->descriptor==-1) {
+    	fprintf(stderr,"Error: cannot open UDP socket for per-packet data transmission (-w option).\nDetails: %s\n",strerror(errno));
+        return -1;
+    }
+
+    if(opts->udp_params.devname!=NULL) {
+    	// Bind to the specified interface/IP address
+
+    	// First of all, retrieve the IP address from the specified devname
+    	strncpy(ifreq.ifr_name,opts->udp_params.devname,IFNAMSIZ);
+    	ifreq.ifr_addr.sa_family=AF_INET;
+
+    	if(ioctl(sock_data->descriptor,SIOCGIFADDR,&ifreq)!=-1) {
+			bind_addrin.sin_addr.s_addr=((struct sockaddr_in*)&ifreq.ifr_addr)->sin_addr.s_addr;
+		} else {
+			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\n"
+				"Details: cannot retrieve IP address for interface %s.\n",opts->udp_params.devname);
+			return -2;
+		}
+
+    	bind_addrin.sin_port=0;
+    	bind_addrin.sin_family=AF_INET;
+
+    	// Call bind() to bind the socket to specified interface
+		if(bind(sock_data->descriptor,(struct sockaddr *) &(bind_addrin),sizeof(bind_addrin))<0) {
+			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\nDetails: %s\n",strerror(errno));
+			return -2;
+		}
+    }
+
+    memset(&(sock_data->addrto),0,sizeof(sock_data->addrto));
+    sock_data->addrto.sin_family=AF_INET;
+    sock_data->addrto.sin_port=htons(opts->udp_params.port);
+    sock_data->addrto.sin_addr.s_addr=opts->udp_params.ip_addr.s_addr;
+
+	return 0;
+}
+
 // When printing additional data with -X, this function shall always be called after updating the report with "reportStructureUpdate()"
 int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData) {
 	int dprintf_ret_val;
@@ -579,28 +642,24 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 	// Print extra data to CSV file, if requested with -X
 	// -X 'a' will set all the bits in "enabled_extra_data", thus making the program enter in all the if statements below
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
-		perTillNow=perPktData->reportDataPointer!=NULL ? 
-			((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) :
-			-1;
+		perTillNow=compute_perTillNow(perPktData);
 
 		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f",perTillNow);
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
-		reconstructedSeqNo=perPktData->reportDataPointer!=NULL ? 
-			perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo:
-			-1;
+		reconstructedSeqNo=compute_reconstructedSeqNo(perPktData);
 		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,reconstructedSeqNo);
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
 		// perPktData->reportDataPointer->minLatency contains the current maximum measured latency (at the end of the test will contain the global test maximum)
-		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->minLatency : -1);
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.*f",decimal_digits,compute_minLatency(perPktData));
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
 		// perPktData->reportDataPointer->minLatency contains the current minimum measured latency (at the end of the test will contain the global test minimum)
-		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,perPktData->reportDataPointer!=NULL ? perPktData->reportDataPointer->maxLatency : -1);
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.*f",decimal_digits,compute_maxLatency(perPktData));
 	}
 
 	dprintf_ret_val+=dprintf(Tfiledescriptor,"\n");
@@ -608,8 +667,67 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 	return dprintf_ret_val;
 }
 
+int writeToUDPSocket(udp_sock_data_t *sock_data,int decimal_digits,perPackerDataStructure *perPktData) {
+	char sockbuff[MAX_w_UDP_SOCK_BUF_SIZE];
+	int str_char_count=0;
+	int return_error_code=0;
+
+	// Prepare the full string (i.e. the UDP packet content) to be sent via the UDP socket
+	if(perPktData->followup_on_flag==0) {
+		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"seq=%" PRIu64 ",latency=%.*f,tx_timestamp=%ld.%06ld,error=%d",
+			perPktData->seqNo,
+			decimal_digits,(double)(perPktData->signedTripTime)/1000,
+			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
+			perPktData->signedTripTime<=0 ? 1 : 0);
+	} else {
+		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"seq=%" PRIu64 ",latency=%.*f,proctime=%.*f,tx_timestamp=%ld.%06ld,error=%d",
+			perPktData->seqNo,
+			decimal_digits,(double)(perPktData->signedTripTime)/1000,
+			decimal_digits,(double)(perPktData->tripTimeProc)/1000,
+			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
+			perPktData->signedTripTime<=0 ? 1 : 0);
+	}
+
+	// Save the required extra (-X) data too
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",pertillnow=%.2f",compute_perTillNow(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",fullseq=%" PRIu64,compute_reconstructedSeqNo(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",currmin=%.*f",decimal_digits,compute_minLatency(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",currmax=%.*f",decimal_digits,compute_maxLatency(perPktData));
+	}
+
+	// Send the current data via a UDP socket
+	if(sock_data!=NULL) {
+		if(sendto(sock_data->descriptor,sockbuff,strlen(sockbuff),0,(struct sockaddr *)&(sock_data->addrto),sizeof(struct sockaddr_in))!=strlen(sockbuff)) {
+			fprintf(stderr,"writeToUDPSocket() error: cannot send the current information via the specified UDP socket (-w).\n");
+			perror("UDP socket error:");
+			return_error_code=-1;
+		}
+	} else {
+		fprintf(stderr,"writeToUDPSocket() error: no valid socket has been set up for the -w option.\n");
+		return_error_code=-2;
+	}
+
+	return return_error_code;
+}
+
 void closeTfile(int Tfiledescriptor) {
 	if(Tfiledescriptor>0) {
 		close(Tfiledescriptor);
+	}
+}
+
+void closeUDPSocket(udp_sock_data_t *sock_data) {
+	if(sock_data!=NULL && sock_data->descriptor>0) {
+		close(sock_data->descriptor);
 	}
 }

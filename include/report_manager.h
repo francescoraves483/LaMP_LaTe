@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include "options.h"
 
+typedef struct udp_sock_data {
+	int descriptor;
+	struct sockaddr_in addrto;
+} udp_sock_data_t;
+
 // Taking into account 20 characters to represent each 64 bit number + 5 characters to represent a 16 bit nummber + 3 characters to represent a 8 bit nummber + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 10 '-' chacaters=20*6+6+25*2+1+10=158 + some margin = 201
 #define REPORT_BUFF_SIZE 201
 
@@ -85,7 +90,10 @@ void reportStructureFinalize(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
 int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data);
+int openUDPSocket(udp_sock_data_t *sock_data,struct options *opts);
 int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData);
+int writeToUDPSocket(udp_sock_data_t *sock_data,int decimal_digits,perPackerDataStructure *perPktData);
 void closeTfile(int Tfilepointer);
+void closeUDPSocket(udp_sock_data_t *sock_data);
 
 #endif

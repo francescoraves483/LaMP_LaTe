@@ -38,6 +38,9 @@ struct lampsock_data {
 	char devname[IFNAMSIZ];
 	int ifindex;
 	struct timeval rx_timeout;
+
+	// UDP socket parameters for the -w reporting option
+ 	udp_sock_data_t udp_w_data;
 };
 
 #if AMQP_1_0_ENABLED

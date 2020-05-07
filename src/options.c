@@ -1320,8 +1320,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		print_short_info_err(options);
 	}
 
-	if(options->Wfilename==NULL && options->report_extra_data!=0) {
-		fprintf(stderr,"Error: the -X option requires -W to be selected too.\n");
+	if(options->Wfilename==NULL && !options->udp_params.enabled && options->report_extra_data!=0) {
+		fprintf(stderr,"Error: the -X option requires -W or -w to be selected too.\n");
+		print_short_info_err(options);
+	}
+
+	if(options->udp_params.enabled && options->udp_params.port == options->port) {
+		fprintf(stderr,"Error: the main socket used by LaMP and the socket for the -w option cannot have the same port.\n");
+		fprintf(stderr,"Port for the main LaMP socket (it can be changed with -p): %lu\n",options->port);
 		print_short_info_err(options);
 	}
 

@@ -615,11 +615,18 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 				reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
 
 				// When '-W' is specified, write the current measured value to the specified CSV file too (if a file was successfully opened)
-				if(Wfiledescriptor>0) {
+				if(Wfiledescriptor>0 || opts->udp_params.enabled) {
 					perPktData.seqNo=lamp_seq_rx;
 					perPktData.signedTripTime=timevalSub_retval==0 ? rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec : -(rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec);
 					perPktData.tx_timestamp=tx_timestamp;
-					writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+
+					if(Wfiledescriptor>0) {
+						writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+					}
+
+					if(opts->udp_params.enabled) {
+						writeToUDPSocket(&(sData.udp_w_data),W_DECIMAL_DIGITS,&perPktData);
+					}
 				}
 			break;
 

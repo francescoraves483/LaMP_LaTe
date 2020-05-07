@@ -719,7 +719,7 @@ static void *rxLoop_t (void *arg) {
 			reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
-			if(Wfiledescriptor>0) {
+			if(Wfiledescriptor>0 || args->opts->udp_params.enabled) {
 				perPktData.seqNo=lamp_seq_rx;
 				perPktData.signedTripTime=tripTime;
 				perPktData.tripTimeProc=tripTimeProc;
@@ -729,7 +729,14 @@ static void *rxLoop_t (void *arg) {
 				}
 
 				perPktData.tx_timestamp=tx_timestamp;
-				writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+
+				if(Wfiledescriptor>0) {
+					writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+				}
+
+				if(args->opts->udp_params.enabled) {
+					writeToUDPSocket(&(args->sData.udp_w_data),W_DECIMAL_DIGITS,&perPktData);
+				}
 			}
 
 			if(continueFlag==0) {

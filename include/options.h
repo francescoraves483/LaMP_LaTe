@@ -57,6 +57,9 @@
 // Max port string size (define only when AMQP 1.0 is active)
 #define MAX_PORT_STR_SIZE 6 // 5 characters + final '\0'
 
+// Maximum UDP buffer size for the -w option
+#define MAX_w_UDP_SOCK_BUF_SIZE 1472
+
 // nonwlan_mode values (defined here for readability reasons)
 #define NONWLAN_MODE_WIRELESS 0
 #define NONWLAN_MODE_WIRED 1

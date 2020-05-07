@@ -88,7 +88,7 @@ static int amqpACKReportSender(lamptype_t type,pn_link_t *lnk,struct amqp_data *
 	return 1;
 }
 
-static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *aData,struct options *opts, reportStructure *reportPtr) {
+static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *aData,struct options *opts,udp_sock_data_t *udp_w_data,reportStructure *reportPtr) {
 	size_t rx_size;
 	// AMQP message buffer (size: maximum LaMP packet length + ADDITIONAL_AMQP_HEADER_MAX_SIZE)
 	char amqp_message_buf[MAX_LAMP_LEN+ADDITIONAL_AMQP_HEADER_MAX_SIZE];
@@ -189,11 +189,19 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 			reportStructureUpdate(reportPtr,tripTime,lamp_seq_rx);
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
-			if(aData->Wfiledescriptor>0) {
+			if(aData->Wfiledescriptor>0 || opts->udp_params.enabled) {
 				aData->perPktData.seqNo=lamp_seq_rx;
 				aData->perPktData.signedTripTime=timevalSub_retval==0 ? rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec : -(rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec);
 				aData->perPktData.tx_timestamp=tx_timestamp;
-				writeToTFile(aData->Wfiledescriptor,W_DECIMAL_DIGITS,&(aData->perPktData));
+
+				if(aData->Wfiledescriptor>0) {
+					writeToTFile(aData->Wfiledescriptor,W_DECIMAL_DIGITS,&(aData->perPktData));
+				}
+
+				if(opts->udp_params.enabled && udp_w_data!=NULL) {
+					writeToUDPSocket(udp_w_data,W_DECIMAL_DIGITS,&(aData->perPktData));
+				}
+				
 			}
 		}
 	}
@@ -281,7 +289,7 @@ static int amqpInitACKreceiver(lamptype_t type,pn_link_t *lnk,pn_delivery_t *d,s
     return isRightMsgReceived;
 }
 
-static int consumerEventHandler(struct amqp_data *aData,struct options *opts,reportStructure *reportPtr,pn_event_t* handled_event) {
+static int consumerEventHandler(struct amqp_data *aData,struct options *opts,udp_sock_data_t *udp_w_data,reportStructure *reportPtr,pn_event_t* handled_event) {
 	pn_connection_t* connection;
 	pn_session_t *s;
 	static pn_link_t *l_rx;
@@ -398,7 +406,7 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 						}
 					} else if(consumerStatus==C_ACKSENT) {
 						// We can start the LaMP UNIDIR packet reception
-						amqpUNIDIRReceiver_retval=amqpUNIDIRReceiver(lnk,e_delivery,aData,opts,reportPtr);
+						amqpUNIDIRReceiver_retval=amqpUNIDIRReceiver(lnk,e_delivery,aData,opts,udp_w_data,reportPtr);
 
 						if(amqpUNIDIRReceiver_retval==0) {
 							// The test completed successfully, we can now update the consumer status
@@ -472,7 +480,7 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 	return 1;
 }
 
-unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts) {
+unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, udp_sock_data_t *udp_w_data) {
 	// LaMP parameters
 	reportStructure reportData;
 
@@ -516,7 +524,7 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts) {
 	do {
 		pn_event_batch_t *events_batch=pn_proactor_wait(aData.proactor);
 		for(pn_event_t *e=pn_event_batch_next(events_batch);e!=NULL;e=pn_event_batch_next(events_batch)) {
-			pn_eventhdlr_retval=consumerEventHandler(&aData,opts,&reportData,e);
+			pn_eventhdlr_retval=consumerEventHandler(&aData,opts,udp_w_data,&reportData,e);
 			if(pn_eventhdlr_retval==-1) {
 				pn_error_condition=1;
 			} else if(pn_eventhdlr_retval==-2) {
