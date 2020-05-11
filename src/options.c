@@ -889,9 +889,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				break;
 
 			case 'R':
-				{
-
-				char *consistency_check_str=NULL;
 				// If the first character corresponds to a correct random distribution type, parse 'param',
 				//  which will define an additional parameter for each distribution.
 				// If available, parse also the batch size, in which the interval will be kept the same.
@@ -929,14 +926,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 							"Valid options are: 'u'='uniform','U'='uniform (improved, no modulo bias)','e'='exponential','n'='normal'\n",
 							optarg[0]);
 						print_short_info_err(options);
-				}
-				consistency_check_str=timerRandDistribCheckConsistency(options->interval,options->rand_param,options->rand_type);
-
-				if(consistency_check_str!=NULL) {
-					fprintf(stderr,"Error when specifying the '-R' value: %s.\n",consistency_check_str);
-					print_short_info_err(options);
-				}
-				
 				}
 				break;
 
@@ -1142,6 +1131,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(T_flag==1) {
 			fprintf(stderr,"Warning: -T is a client-only option. It will be ignored.\n");
 		}
+		if(options->rand_type!=NON_RAND) {
+			fprintf(stderr,"Error: -R is a client-only option.\n");
+			print_short_info_err(options);
+		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
 			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
@@ -1175,6 +1168,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(T_flag==1) {
 			fprintf(stderr,"Warning: -T is a client-only option. It will be ignored.\n");
+		}
+		if(options->rand_type!=NON_RAND) {
+			fprintf(stderr,"Error: -R is a client-only option.\n");
+			print_short_info_err(options);
 		}
 	}
 
@@ -1254,6 +1251,18 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		} else if(options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER) {
 			// Set the default timeout value if no explicit value was defined
 			options->interval=SERVER_DEF_TIMEOUT;
+		}
+	}
+
+	// Check the consistency of the parameters specified after -R, if -R was specified (i.e. if options->rand_type!=NON_RAND)
+	if(options->rand_type!=NON_RAND) {
+		char *consistency_check_str=NULL;
+
+		consistency_check_str=timerRandDistribCheckConsistency(options->interval,options->rand_param,options->rand_type);
+
+		if(consistency_check_str!=NULL) {
+			fprintf(stderr,"Error when specifying the '-R' value: %s.\n",consistency_check_str);
+			print_short_info_err(options);
 		}
 	}
 
