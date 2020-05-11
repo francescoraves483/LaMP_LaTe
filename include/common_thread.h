@@ -68,7 +68,8 @@ typedef enum {
 	ERR_INVALID_ARG_FOLLOWUPREQTYPE,
 	ERR_MALLOC,
 	ERR_RECVFROM_GENERIC,
-	ERR_TXSTAMP
+	ERR_TXSTAMP,
+	ERR_CLEAR_TIMER_EVENT
 } t_error_types;
 
 void thread_error_print(const char *name, t_error_types err);

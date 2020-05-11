@@ -232,7 +232,9 @@ static int transmitReportUDP(struct lampsock_data sData, struct options *opts) {
 		poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
 		if(poll_retval>0) {
 			// "Clear the event" by performing a read() on a junk variable
-			read(clockFd,&junk,sizeof(junk));
+			if(read(clockFd,&junk,sizeof(junk))==-1) {
+				fprintf(stderr,"Failed to read a timer event when sending the report. The next attempts may fail.\n");
+			}
 		}
 	
 		// Successive attempts will have an increased sequence number
@@ -330,6 +332,9 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 
 	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
 	int timevalSub_retval=0;
+
+	// Flag managed internally by writeToReportSocket()
+	uint8_t first_call=1;
 
 	ack_report_received=0;
 	followup_mode_session=FOLLOWUP_OFF;
@@ -625,7 +630,7 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 					}
 
 					if(opts->udp_params.enabled) {
-						writeToUDPSocket(&(sData.udp_w_data),W_DECIMAL_DIGITS,&perPktData);
+						writeToReportSocket(&(sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
 					}
 				}
 			break;
@@ -724,6 +729,13 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	if(mode_session==UNIDIR) {
 		if(Wfiledescriptor>0) {
 			closeTfile(Wfiledescriptor);
+		}
+
+		if(opts->udp_params.enabled) {
+			// If '-w' was specified and the mode is undirectional, send a LateEND empty packet to make the 
+			// receiving application stop reading the data; this empty packet is triggered by setting the 
+			// second argument (report) to NULL
+			printStatsSocket(opts,NULL,&(sData.sock_w_data),lamp_id_session);
 		}
 
 		if(transmitReportUDP(sData, opts)) {

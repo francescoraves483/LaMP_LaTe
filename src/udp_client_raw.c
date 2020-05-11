@@ -404,7 +404,10 @@ static void txLoop (arg_struct *args) {
 		// poll waiting for events happening on the timer descriptor (i.e. wait for timer expiration)
 		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
 			// "Clear the event" by performing a read() on a junk variable
-			read(clockFd,&junk,sizeof(junk));
+			if(read(clockFd,&junk,sizeof(junk))==-1) {
+				t_tx_error=ERR_CLEAR_TIMER_EVENT;
+				break;
+			}
 
 			// Rearm timer with a random timeout if '-R' was specified
 			if(args->opts->rand_type!=NON_RAND && batch_counter==args->opts->rand_batch_size) {
@@ -569,6 +572,9 @@ static void *rxLoop_t (void *arg) {
 	int fu_flag=1; // Flag set to 0 when a follow-up is received after an ENDREPLY or ENDREPLY_TLESS (SOFTWARE or HARDWARE latencyType only, fixed to 0 for other types)
 	int continueFlag=1; // Flag set to 0 when an ENDREPLY or ENDREPLY_TLESS is received
 	int errorTsFlag=0; // Flag set to 1 when an error occurred in retrieving a timestamp (i.e. if no latency data can be reported for the current packet)
+
+	// Flag managed internally by writeToReportSocket()
+	uint8_t first_call=1;
 
 	// Container for the source MAC address (read from packet)
 	macaddr_t srcmacaddr_pkt=prepareMacAddrT();
@@ -833,7 +839,7 @@ static void *rxLoop_t (void *arg) {
 				}
 
 				if(args->opts->udp_params.enabled) {
-					writeToUDPSocket(&(args->sData.udp_w_data),W_DECIMAL_DIGITS,&perPktData);
+					writeToReportSocket(&(args->sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
 				}
 			}
 
@@ -1151,6 +1157,11 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	if(opts->filename!=NULL) {
 		// If '-f' was specified, print the report data to a file too
 		printStatsCSV(opts,&reportData,opts->filename);
+	}
+
+	if(opts->udp_params.enabled) {
+		// If '-w' was specified, send the report data inside a TCP packet, through a socket
+		printStatsSocket(opts,&reportData,&(sData.sock_w_data),lamp_id_session);
 	}
 
 	if(!CHECK_SL_NULL(tslist)) {

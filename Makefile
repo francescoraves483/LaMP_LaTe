@@ -30,7 +30,7 @@ OBJ_CC_FULL=$(OBJ_FULL)
 OBJ_CC_FULL+=$(OBJ_RAWSOCK_LIB)
 OBJ_CC_FULL+=$(OBJ_QPID_MODULE)
 
-CFLAGS += -Wall -O2 -Iinclude -IRawsock_lib/Rawsock_lib
+CFLAGS += -Wall -Wno-stringop-truncation -O2 -Iinclude -IRawsock_lib/Rawsock_lib
 LDLIBS += -lpthread -lm
 
 .PHONY: all clean

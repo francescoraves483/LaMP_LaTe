@@ -352,7 +352,10 @@ static void txLoop (arg_struct_udp *args) {
 		// poll waiting for events happening on the timer descriptor (i.e. wait for timer expiration)
 		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
 			// "Clear the event" by performing a read() on a junk variable
-			read(clockFd,&junk,sizeof(junk));
+			if(read(clockFd,&junk,sizeof(junk))==-1) {
+				t_tx_error=ERR_CLEAR_TIMER_EVENT;
+				break;
+			}
 
 			// Rearm timer with a random timeout if '-R' was specified
 			if(args->opts->rand_type!=NON_RAND && batch_counter==args->opts->rand_batch_size) {
@@ -491,6 +494,9 @@ static void *rxLoop_t (void *arg) {
 	// Ancillary data buffers
 	char ctrlBufSw[CMSG_SPACE(sizeof(struct timeval))];
 	char ctrlBufHw[CMSG_SPACE(sizeof(struct scm_timestamping))];
+
+	// Flag managed internally by writeToReportSocket()
+	uint8_t first_call=1;
 
 	// timevalStoreList to store the tx_timestamp values when -W is selected and follow-up mode is active
 	// This may be needed because, in this case, the final per-packet data is printed/saved only upon
@@ -735,7 +741,7 @@ static void *rxLoop_t (void *arg) {
 				}
 
 				if(args->opts->udp_params.enabled) {
-					writeToUDPSocket(&(args->sData.udp_w_data),W_DECIMAL_DIGITS,&perPktData);
+					writeToReportSocket(&(args->sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
 				}
 			}
 
@@ -1014,6 +1020,11 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	if(opts->filename!=NULL) {
 		// If '-f' was specified, print the report data to a file too
 		printStatsCSV(opts,&reportData,opts->filename);
+	}
+
+	if(opts->udp_params.enabled) {
+		// If '-w' was specified, send the report data inside a TCP packet, through a socket
+		printStatsSocket(opts,&reportData,&(sData.sock_w_data),lamp_id_session);
 	}
 
 	if(!CHECK_SL_NULL(tslist)) {

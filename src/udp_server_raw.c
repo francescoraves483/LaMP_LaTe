@@ -283,7 +283,9 @@ static int transmitReport(struct lampsock_data sData, struct options *opts, stru
 		poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
 		if(poll_retval>0) {
 			// "Clear the event" by performing a read() on a junk variable
-			read(clockFd,&junk,sizeof(junk));
+			if(read(clockFd,&junk,sizeof(junk))==-1) {
+				fprintf(stderr,"Failed to read a timer event when sending the report. The next attempts may fail.\n");
+			}
 		}
 	}
 
@@ -394,6 +396,9 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
 	int timevalSub_retval=0;
 
+	// Flag managed internally by writeToReportSocket()
+	uint8_t first_call=1;
+
 	// Very important: initialize to 0 any flag that is used inside threads
 	ack_report_received=0;
 	followup_mode_session=FOLLOWUP_OFF;
@@ -448,7 +453,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		// Check if the KRT mode is supported by the current NIC and set the proper socket options
 		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW_RX)<0) {
 		 	perror("socketSetTimestamping() error");
-			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
+			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not supported. Switching back to user-to-user latency.\n");
 			opts->latencyType=USERTOUSER;
 		}
 
@@ -715,7 +720,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 					}
 
 					if(opts->udp_params.enabled) {
-						writeToUDPSocket(&(sData.udp_w_data),W_DECIMAL_DIGITS,&perPktData);
+						writeToReportSocket(&(sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
 					}
 				}
 			break;
@@ -841,6 +846,13 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				"No report will be transmitted.\n");
 			CLEAR_ALL();
 			return 4;
+		}
+
+		if(opts->udp_params.enabled) {
+			// If '-w' was specified and the mode is undirectional, send a LateEND empty packet to make the 
+			// receiving application stop reading the data; this empty packet is triggered by setting the 
+			// second argument (report) to NULL
+			printStatsSocket(opts,NULL,&(sData.sock_w_data),lamp_id_session);
 		}
 	}
 

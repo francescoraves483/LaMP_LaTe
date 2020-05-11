@@ -118,16 +118,42 @@
     "\t  available attempts have been performed, it will simply append to <filename>.csv.\n" \
 	"\t  Warning! This option may negatively impact performance.\n"
 #define OPT_V_both \
-		"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n" \
-		"\t  additional information when each test is performed. Not all modes/protocol will print more information\n" \
-		"\t  when this mode is activated.\n"
+	"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n" \
+	"\t  additional information when each test is performed. Not all modes/protocol will print more information\n" \
+	"\t  when this mode is activated.\n"
 #define OPT_w_both \
-	"  -w <IPv4:port>: output per-packet data, just like -W for a CSV file, to a UDP socket, which can then be read by\n" \
-	"\t  any other application for further processing. To improve usability, the data is sent towards the selected IPv4\n" \
+	"  -w <IPv4:port>: output per-packet and report data, just like -W and -f for a CSV file, to a socket, which can then be\n" \
+	"\t  read by any other application for further processing. To improve usability, the data is sent towards the selected IPv4\n" \
 	"\t  and port in a textual, CSV-like human-readable format.\n" \
 	"\t  When no port is specified, "STRINGIFY(DEFAULT_W_SOCKET_PORT)" will be used.\n" \
 	"\t  After <IPv4:port>, it is possibile to specify an interface, through its name, to bind the socket to, for instance:\n" \
-	"\t  '-w 192.168.1.101:46001,enp2s0'; if no interface is specified, the socket will be bound to all interfaces.\n"
+	"\t  '-w 192.168.1.101:46001,enp2s0'; if no interface is specified, the socket will be bound to all interfaces.\n" \
+	"\t  This options involves the usage of two parallel sockets, bounded and connected to the same port (and, optionally,\n" \
+	"\t  interface): one UDP socket, for sending the per-packer data, and one TCP socket, for sending more sentitive data,\n" \
+	"\t  namely an initial packet telling how to interpret the comma separated fields sent via the UDP socket, for the\n" \
+	"\t  per-packet data, and a final packet containing the final report data (including min, max, average, and so on).\n" \
+	"\t  The initial packet is formatted in this way: 'LaTeINIT,<LaMP ID>,fields=f1;f2;...;fn', where <LaMP ID> is the\n" \
+	"\t  current test ID, and 'fields=' is telling the meaning of the comma-separated fields which will be sent via UDP,\n" \
+	"\t  e.g. 'LaTeINIT,55321,fields=seq;latency;tx_timestamp;error'.\n" \
+	"\t  Each UDP packet will be instead formatted in this way: 'LaTe,<LaMP ID>,<f1>,<f2>,...,<fn>', where <fi> is the value\n" \
+	"\t  of the i-th field, as described in the first TCP packet, e.g. 'LaTe,55321,2,0.388,1588953642.084513,0'.\n" \
+	"\t  Then, at the end of a test, a final packet will be sent via TCP, formatted as: 'LaTeEND,<LaMP ID>,f1=<f1>,...,fn=<fn>'\n" \
+	"\t  where fi=<fi> are fields containing the final report data, e.g. timestamp=1588953727,clientmode=pinglike,..., reported\n" \
+	"\t  in a very similar way to what it is normally saved inside an -f CSV file.\n" \
+	"\t  An application reading this data should:\n" \
+	"\t    1) Create a TCP socket, as server, waiting for a LaTe instance (TCP client) to connect. There should be then two cases: \n" \
+	"\t    a.1) If 'LateINIT' is received, save which per-packet fields will be sent via UDP and the current test ID and start\n" \
+	"\t         waiting for and receiving UDP packets, after opening a UDP socket.\n" \
+	"\t    a.2) Discard all the UDP packets which are not starting with 'LaTe' and the correct ID, saved in (a.1).\n" \
+	"\t    a.3) When a UDP packet is received, parse/process the data contained inside using the fields received in (a.1).\n" \
+	"\t    a.4) When 'LateEND' is received and if it has the right ID, stop waiting for new UDP packets and save all the report data\n" \
+	"\t         contained inside, processing it depending on the user needs. If 'LaTeEND' has the third field set to 'srvtermination',\n" \
+	"\t         it should be considered just a way to gracefully terminate the current connection after a unidirectional test, without\n" \
+	"\t         carrying any particular final report data.\n" \
+	"\t    b.1) If 'LaTeEND' is received without any 'LaTeINIT' preceding it, a unidirectional client is involved and no per-packet\n" \
+	"\t         data is expected to be received. In this case, just save all the report data contained inside, processing it\n" \
+	"\t         depending on the user's needs.\n" \
+	"\t    2) Close any TCP socket which was left open before accepting a new connection on the same port.\n"
 #define OPT_X_both \
 	"  -X: when -W/-w is specified, it is possible to print extra single packet information by specifying some characters\n" \
 	"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n" \
@@ -238,7 +264,9 @@ static void print_long_info(void) {
 			OPT_f_client
 			OPT_o_client
 			OPT_w_both
-			"\t  This options applies to a client only in ping-like mode.\n"
+			"\t  When in unidirectional mode, no per-packet data or 'LaTeINIT' is sent with -w, as they are managed by\n"
+			"\t  the server. A 'LaTeEND' packet, with the final statistics, will be sent via TCP at the end of the test\n"
+			"\t  only.\n"
 			OPT_y_both
 			OPT_W_both
 			"\t  This options applies to a client only in ping-like mode.\n"
@@ -279,7 +307,10 @@ static void print_long_info(void) {
 
 			// File options
 			OPT_w_both
-			"\t  This options applies to a server only in unidirectional mode.\n"
+			"\t  This options applies to a server only in unidirectional mode; in this case, 'LaTeEND' won't contain\n"
+			"\t  any final report, but it will just be formatted as 'LaTe,<LaMP ID>,srvtermination' and it can be used\n"
+			"\t  to gracefully terminate the connection from the application reading the -w data. A server, during a\n"
+			"\t  unidirectional test, can only send per-packet data to an external application via TCP/UDP.\n"
 			OPT_y_both
 			OPT_W_both
 			"\t  This options applies to a server only in unidirectional mode.\n"
@@ -429,12 +460,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t T_flag=0; // = 1 if -T was specified, otherwise = 0
 	uint8_t N_flag=0; // = 1 if -N was specified, otherwise = 0
 
-	/* 
-	   The p_flag has been inserted only for future use: it is set as a port is explicitely defined. This allows to check if a port was specified
-	   for a protocol without the concept of 'port', as more protocols will be implemented in the future. In that case, it will be possible to
-	   print a warning and ignore the specified value.
-	*/
-	uint8_t p_flag=0; // =1 if a port was explicitely specified, otherwise = 0
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
 
@@ -520,7 +545,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				if(destAddrLen>1) {
 					options->dest_addr_u.destAddrStr=malloc((destAddrLen)*sizeof(char));
 					if(!options->dest_addr_u.destAddrStr) {
-						fprintf(stderr,"Error in parsing the specified destinatio address: cannot allocate memory.\n");
+						fprintf(stderr,"Error in parsing the specified destination address: cannot allocate memory.\n");
 						print_short_info_err(options);
 					}
 					strncpy(options->dest_addr_u.destAddrStr,optarg,destAddrLen);
@@ -595,8 +620,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					options->port=CLIENT_SRCPORT+1;
 					fprintf(stderr,"Port cannot be equal to the raw client source port (%d). %ld will be used instead.\n",CLIENT_SRCPORT,options->port);
 				}
-
-				p_flag=1;
 				break;
 
 			case 'f':
@@ -707,11 +730,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 						}
 					}
 				}
-
-				fprintf(stdout,"[TBR] specified_fields: %02X - IP: %s, port: %" PRIu16 ", devname=%s\n",
-					specified_fields,
-					inet_ntoa(options->udp_params.ip_addr),options->udp_params.port,
-					options->udp_params.devname==NULL?"(null)":options->udp_params.devname);
 
 				options->udp_params.enabled=1;
 

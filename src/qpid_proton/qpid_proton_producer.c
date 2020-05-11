@@ -314,14 +314,17 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 					poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
 					if(poll_retval>0) {
 						// "Clear the event" by performing a read() on a junk variable
-						read(clockFd,&junk,sizeof(junk));
+						if(read(clockFd,&junk,sizeof(junk))==-1) {
+							fprintf(stderr,"Error: unable to read a timer event before sending a packet.\nIt is not safe to continue the current test from packet: %d.\n",counter);
+							return -4;
+						}
 					}
 
 					// Rearm timer with a random timeout if '-R' was specified
 					if(opts->rand_type!=NON_RAND && batch_counter==opts->rand_batch_size) {
 						if(timerRearmRandom(clockFd,opts)<0) {
 							fprintf(stderr,"Error: unable to set random interval with distribution %s\n",enum_to_str_rand_distribution_t(opts->rand_type));
-							return -2;
+							return -3;
 						}
 						batch_counter=0;
 					}
@@ -455,7 +458,7 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 	return 1;
 }
 
-unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
+unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts, report_sock_data_t *sock_w_data) {
 	// LaMP parameters
 	reportStructure reportData;
 
@@ -506,7 +509,7 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
 			if(pn_eventhdlr_retval==-1) {
 				pn_error_condition=ERROR_COND_AMQP_ERROR;
 			} else if(pn_eventhdlr_retval==-2) {
-				fprintf(stdout,"Error: timeout occurreddddd.\n");
+				fprintf(stdout,"Error: timeout occurred.\n");
 				pn_error_condition=ERROR_COND_TIMEOUT;
 			}
 		}
@@ -522,9 +525,17 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts) {
 		printStats(&reportData,stdout,opts->confidenceIntervalMask);
 	} 
 
-	if(opts->filename!=NULL && (pn_error_condition==ERROR_COND_NO_ERROR || pn_error_condition==ERROR_COND_TIMEOUT)) {
-		// If '-f' was specified, print the report data to a file too
-		printStatsCSV(opts,&reportData,opts->filename);
+
+	if(pn_error_condition==ERROR_COND_NO_ERROR || pn_error_condition==ERROR_COND_TIMEOUT) {
+		if(opts->filename!=NULL) {
+			// If '-f' was specified, print the report data to a file too
+			printStatsCSV(opts,&reportData,opts->filename);
+		}
+
+		if(opts->udp_params.enabled) {
+			// If '-w' was specified, send the report data inside a TCP packet, through a socket
+			printStatsSocket(opts,&reportData,sock_w_data,lamp_id_session);
+		}
 	}
 
 	// Free Qpid proton allocated memory

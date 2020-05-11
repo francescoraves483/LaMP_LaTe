@@ -59,6 +59,9 @@ void thread_error_print(const char *name, t_error_types err) {
 		case ERR_TXSTAMP:
 			fprintf(stderr,"%s reported an error when retrieving the TX timestamp in hardware mode. Try using another mode.\n",name);
 			break;
+		case ERR_CLEAR_TIMER_EVENT:
+			fprintf(stderr,"%s reported a timer error: a timer event could not be read and the execution was terminated.\n",name);
+			break;
 		default:
 			fprintf(stderr,"%s reported a generic error.\n",name);
 			break;

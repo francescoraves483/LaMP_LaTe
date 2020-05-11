@@ -59,6 +59,8 @@
 
 // Maximum UDP buffer size for the -w option
 #define MAX_w_UDP_SOCK_BUF_SIZE 1472
+// Maximum TCP buffer size for the -w option
+#define MAX_w_TCP_SOCK_BUF_SIZE 1472
 
 // nonwlan_mode values (defined here for readability reasons)
 #define NONWLAN_MODE_WIRELESS 0
@@ -73,6 +75,9 @@
 // The size has been set to 12 (IP digits) + 3 ('.' in an IP address) + 5 (a maximum of 5 digits for the port are supported) + 
 // two special chacters (':' and ',') + IFNAMSIZ (which takes into account the maximum interface name size + '\0')
 #define MAX_w_STRING_SIZE (22+IFNAMSIZ)
+
+// -w TCP socket timeout (in ms)
+#define TCP_w_SOCKET_CONNECT_TIMEOUT 5000
 
 // Char <-> shift mapping for SET_REPORT_EXTRA_DATA_BIT
 // To use SET_REPORT_EXTRA_DATA_BIT() you should specify the report_extra_data variable and one of these macros

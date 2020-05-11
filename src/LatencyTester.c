@@ -13,6 +13,7 @@
 #include <signal.h>
 #include "common_socket_man.h"
 #include <errno.h>
+#include "report_manager.h"
 
 #if AMQP_1_0_ENABLED
 #include <proton/proactor.h>
@@ -58,7 +59,7 @@ int main (int argc, char **argv) {
 	#endif
 
 	// Data for the UDP Socket when -w is specified
-	udp_sock_data_t udp_w_data;
+	report_sock_data_t sock_w_data;
 
 	// Read options from command line
 	options_initialize(&opts);
@@ -151,14 +152,14 @@ int main (int argc, char **argv) {
 		#endif
 
 		// If -w was specified (i.e. if pts.udp_params.enabled is equal to 1), open the additional UDP socket
-		if(opts.udp_params.enabled && openUDPSocket(&udp_w_data,&opts)<0) {
+		if(opts.udp_params.enabled && openReportSocket(&sock_w_data,&opts)<0) {
 			fprintf(stderr,"Warning: cannot open the socket for the the -w option. This option will be disabled.\n");
 			opts.udp_params.enabled=0;
 		}
 
 		// udp_w_data is passed to UDP clients/servers using the struct lampsock_data (sData)
 		if(opts.protocol==UDP) {
-			sData.udp_w_data=udp_w_data;
+			sData.sock_w_data=sock_w_data;
 		}
 
 		switch(opts.mode_cs) {
@@ -176,7 +177,7 @@ int main (int argc, char **argv) {
 
 				#if AMQP_1_0_ENABLED
 				if(opts.protocol==AMQP_1_0) {
-					if(runAMQPproducer(aData,&opts)) {
+					if(runAMQPproducer(aData,&opts,&sock_w_data)) {
 						if(!opts.dmode) {
 							close(sData.descriptor);
 							exit(EXIT_FAILURE);
@@ -199,7 +200,7 @@ int main (int argc, char **argv) {
 
 				#if AMQP_1_0_ENABLED
 				if(opts.protocol==AMQP_1_0) {
-					if(runAMQPconsumer(aData,&opts,&udp_w_data)) {
+					if(runAMQPconsumer(aData,&opts,&sock_w_data)) {
 						if(!opts.dmode) {
 							close(sData.descriptor);
 							exit(EXIT_FAILURE);
@@ -219,7 +220,7 @@ int main (int argc, char **argv) {
 
 		// If -w was specified (i.e. if pts.udp_params.enabled is equal to 1), close the additional UDP socket
 		if(opts.udp_params.enabled) {
-			closeUDPSocket(&udp_w_data);
+			closeReportSocket(&sock_w_data);
 		}
 	} while(opts.dmode && !end_prog_flag && (opts.mode_cs==SERVER || opts.mode_cs==LOOPBACK_SERVER));  // Continuosly run the server if the 'continuous daemon mode' is selected (a new socket will be created for each new session)
 

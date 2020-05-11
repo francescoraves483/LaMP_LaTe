@@ -14,6 +14,6 @@ typedef enum {
 	P_ACKSENT
 } producer_status_t;
 	
-unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts);
+unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts, report_sock_data_t *sock_w_data);
 
 #endif

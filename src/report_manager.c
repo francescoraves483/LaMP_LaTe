@@ -1,3 +1,4 @@
+#include "common_socket_man.h"
 #include "report_manager.h"
 #include <limits.h>
 #include <inttypes.h>
@@ -38,6 +39,50 @@
 #define compute_minLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)(perPktData->reportDataPointer->minLatency)/1000 : -1
 
 #define compute_maxLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)perPktData->reportDataPointer->maxLatency/1000 : -1
+
+
+static inline double computeLostPktPerc(reportStructure *report) {
+	double lostPktPerc;
+
+	// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
+	// If no reportStructureUpdate() was ever called (i.e. minLatency is still UINT64_MAX), set the lost packets percentage to 100%
+	if(report->minLatency!=UINT64_MAX) {
+		lostPktPerc=report->totalPackets>=report->packetCount ? ((double) ((report->totalPackets-report->packetCount)))*100/(report->totalPackets) : ((double) ((report->packetCount-report->totalPackets)))*-100/(report->packetCount);
+	} else {
+		lostPktPerc=100;
+	}
+
+	return lostPktPerc;
+}
+
+static inline double computeLostPktPercLastSeqNo(reportStructure *report) {
+	double lostPktPercLastSeqNo;
+
+	// This function works almost as computeLostPktPerc(), but it computes the lost packet percentage up to the last received sequence number
+	if(report->minLatency!=UINT64_MAX) {
+		lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1);
+	} else {
+		lostPktPercLastSeqNo=100;
+	}
+
+	return lostPktPercLastSeqNo;
+}
+
+static inline char *getProtocolName(protocol_t protocol) {
+	switch(protocol) {
+		case UDP:		
+			return "UDP";
+		break;
+		#if AMQP_1_0_ENABLED
+		case AMQP_1_0:
+			return "AMQP 1.0";
+		break;
+		#endif
+		default:
+			return "Unknown";
+		break;
+	}
+}
 
 // Static function to compute ts, to be used to compute the confidence intervals
 /* 	It tries to emulate functions such as MATLAB's tinv(), but without inverting the Student's T cumulative distribution,
@@ -369,20 +414,9 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 				"ConfInt99u\n");
 		}
 
-		// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
-		// If no reportStructureUpdate() was ever called (i.e. minLatency is still UINT64_MAX), set the lost packets percentage to 100%
-		if(report->minLatency!=UINT64_MAX) {
-			lostPktPerc=report->totalPackets>=report->packetCount ? ((double) ((report->totalPackets-report->packetCount)))*100/(report->totalPackets) : ((double) ((report->packetCount-report->totalPackets)))*-100/(report->packetCount);
-		} else {
-			lostPktPerc=100;
-		}
+		lostPktPerc=computeLostPktPerc(report);
 
-		// Do almost the same for the lost packet percentage up to the last received sequence number
-		if(report->minLatency!=UINT64_MAX) {
-			lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1);
-		} else {
-			lostPktPercLastSeqNo=100;
-		}
+		lostPktPercLastSeqNo=computeLostPktPercLastSeqNo(report);
 
 		/* Save report data to file, in CSV style */
 		// Save date and time
@@ -391,15 +425,8 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 		// Save current mode (unidirectional or pinglike) and socket type
 		dprintf(csvfp,"%s,%s,",opts->mode_ub==UNIDIR ? "Unidirectional" : "Pinglike",opts->mode_raw==RAW ? "Raw" : "Non raw");
 
-		// Save current protocol (even if UDP only is supported as of now, it can be convenient to write a switch-case statement, to allow an easier future extensibility of the code with other protocols)
-		switch(opts->protocol) {
-			case UDP:		
-				dprintf(csvfp,"UDP,");
-			break;
-			default:
-				dprintf(csvfp,"Unknown,");
-			break;
-		}
+		// Save current protocol
+		dprintf(csvfp,"%s,",getProtocolName(opts->protocol));
 		
 		// Save report data
 		dprintf(csvfp,"%d," 		// macUP
@@ -481,6 +508,100 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	}
 
 	return printOpErrStatus;
+}
+
+// If this function is called with report==NULL, an empty LaTeEND packet will be sent, formatting its content as:
+// 'LaTeEND,<LaMP ID>,srvtermination'
+int printStatsSocket(struct options *opts, reportStructure *report, report_sock_data_t *sock_data,uint16_t test_id) {
+	char sockbuff_tcp[MAX_w_TCP_SOCK_BUF_SIZE];
+	int str_char_count=0;
+
+	struct timespec curr_ts;
+	long curr_ts_ms;
+
+	const int confidenceIntervals[CONFINT_NUMBER]={90,95,99};
+
+	if(report==NULL) {
+		snprintf(sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE,"LaTeEND,%" PRIu16 ",srvtermination",test_id);
+	} else {
+		// Get the current time (in s and ns from the epoch, i.e. since 00:00:00 UTC, January 1st 1970)
+		if(clock_gettime(CLOCK_REALTIME,&curr_ts)==-1) {
+			// In case of error, send a null timestamp
+			curr_ts_ms=0;
+		} else {
+			curr_ts_ms=curr_ts.tv_sec+round(curr_ts.tv_nsec/1.0e6);
+		}
+
+		str_char_count=snprintf(sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE,"LaTeEND,%" PRIu16 ","
+				"timestamp=%ld,"
+				"protocol=%s,"
+				"clientmode=%s,"
+				"UP=%d,"
+				"payloadlen=%" PRIu16 ","
+				"totpackets=%" PRIu64 ","
+				"interval_ms=%.3f,"
+				"interval_type=%s,"
+				"int_distr_param=%lf,"
+				"int_distr_batch=%" PRIu64 ","
+				"latencytype=%s,"
+				"followup=%d,"
+				"min_ms=%.3f,"
+				"max_ms=%.3f,"
+				"avg_ms=%.3f,"
+				"lostpkts_perc=%.2f,"
+				"errors=%" PRIu64 ","
+				"outoforder=%" PRIu64 ","
+				"stdev=%.4f,"
+				"timeout=%d,"
+				"lastseqno=%" PRIu64 ","
+				"losttolast=%.2f,"
+				"reportok=%d",
+				test_id,																								// (LaMP ID after "LaTeEND,")
+				curr_ts_ms,																								// timestamp
+				getProtocolName(opts->protocol),																		// protocol
+				opts->mode_ub==UNIDIR ? "unidirectional" : "pinglike",													// clientmode
+				opts->macUP==UINT8_MAX ? 0 : opts->macUP,																// UP
+				opts->payloadlen,																						// payloadlen
+				opts->number,																							// totpackets
+				(double) opts->interval,																				// interval_ms
+				opts->rand_type==NON_RAND ? "fixed_periodic" : enum_to_str_rand_distribution_t(opts->rand_type),		// interval_type
+				opts->rand_param,																						// int_distr_param
+				opts->rand_batch_size,																					// int_distr_batch
+				latencyTypePrinter(report->latencyType),																// latencytype
+				report->followupMode,																					// followup (full follow-up mode enum value, =0 if off, >0 if on)
+				report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,								// min_ms
+				((double) report->maxLatency)/1000,																		// max_ms
+				report->minLatency==UINT64_MAX ? 0 : report->averageLatency/1000,										// avg_ms
+				computeLostPktPerc(report),																				// lostpkt_perc
+				report->errorsCount,																					// errors
+				report->outOfOrderCount,																				// outoforder
+				sqrt(report->variance)/1000,																			// stdev
+				report->_timeoutOccurred,																				// timeout
+				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,												// lastseqno (reconstructed, non cyclical)
+				computeLostPktPercLastSeqNo(report),																	// losttolast
+				report->minLatency!=UINT64_MAX																			// reportok
+				);
+
+			// Send only the confidence intervals which were requested trough -C
+			for(int i=0;i<CONFINT_NUMBER;i++) {
+				if(opts->confidenceIntervalMask & (1<<i)) {
+					str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",confint%dm=%.3f,confint%dp=%.3f",
+						confidenceIntervals[i],
+						report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+						confidenceIntervals[i],
+						(report->averageLatency+report->confidenceIntervalDev[i])/1000);
+				}
+			}
+		}
+
+		// Send the final test data over the TCP socket
+		if(send(sock_data->descriptor_tcp,sockbuff_tcp,strlen(sockbuff_tcp),0)!=strlen(sockbuff_tcp)) {
+			fprintf(stderr,"%s() error: cannot send the final test data via the specified TCP socket (-w).\n",__func__);
+			perror("TCP socket error:");
+			return 1;
+		}
+
+	return 0;
 }
 
 int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data) {
@@ -569,44 +690,77 @@ int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, ch
 	return csvfd;
 }
 
-int openUDPSocket(udp_sock_data_t *sock_data,struct options *opts) {
+// This function tries to open a UDP socket for the per-packet data transmission and a TCP socket for the
+// initial data and final aggregated test data transmission
+// The outcome is considered successful only when both socket are open (and the TCP socket is successfully
+// connected to a server)
+int openReportSocket(report_sock_data_t *sock_data,struct options *opts) {
 	struct sockaddr_in bind_addrin;
+	struct sockaddr_in connect_addrin;
 	struct ifreq ifreq;
+	int connect_timeout_rval=0;
 
 	if(!opts->udp_params.enabled) {
 		return -3;
 	}
 
-	sock_data->descriptor=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+	sock_data->descriptor_udp=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
 
-    if(sock_data->descriptor==-1) {
+    if(sock_data->descriptor_udp==-1) {
     	fprintf(stderr,"Error: cannot open UDP socket for per-packet data transmission (-w option).\nDetails: %s\n",strerror(errno));
         return -1;
     }
 
-    if(opts->udp_params.devname!=NULL) {
-    	// Bind to the specified interface/IP address
+    sock_data->descriptor_tcp=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
 
+    if(sock_data->descriptor_tcp==-1) {
+    	close(sock_data->descriptor_udp);
+    	fprintf(stderr,"Error: cannot open TCP socket for per-packet data transmission (-w option).\nDetails: %s\n",strerror(errno));
+        return -1;
+    }
+
+    // Bind to the given interface/IP address, if an interface name was specified
+   	if(opts->udp_params.devname!=NULL) {
     	// First of all, retrieve the IP address from the specified devname
     	strncpy(ifreq.ifr_name,opts->udp_params.devname,IFNAMSIZ);
     	ifreq.ifr_addr.sa_family=AF_INET;
 
-    	if(ioctl(sock_data->descriptor,SIOCGIFADDR,&ifreq)!=-1) {
+    	if(ioctl(sock_data->descriptor_udp,SIOCGIFADDR,&ifreq)!=-1) {
 			bind_addrin.sin_addr.s_addr=((struct sockaddr_in*)&ifreq.ifr_addr)->sin_addr.s_addr;
 		} else {
 			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\n"
 				"Details: cannot retrieve IP address for interface %s.\n",opts->udp_params.devname);
-			return -2;
+			return -3;
 		}
 
     	bind_addrin.sin_port=0;
     	bind_addrin.sin_family=AF_INET;
 
-    	// Call bind() to bind the socket to specified interface
-		if(bind(sock_data->descriptor,(struct sockaddr *) &(bind_addrin),sizeof(bind_addrin))<0) {
+    	// Call bind() to bind the UDP socket to specified interface
+		if(bind(sock_data->descriptor_udp,(struct sockaddr *) &(bind_addrin),sizeof(bind_addrin))<0) {
 			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\nDetails: %s\n",strerror(errno));
-			return -2;
+			return -3;
 		}
+
+		// Call bind() to bind the TCP socket to a specified interface
+		if(bind(sock_data->descriptor_udp,(struct sockaddr *) &(bind_addrin),sizeof(bind_addrin))<0) {
+			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\nDetails: %s\n",strerror(errno));
+			return -3;
+		}
+    }
+
+    // Try to connect to a server (needed for TCP), with a timeout of TCP_w_SOCKET_CONNECT_TIMEOUT milliseconds
+    connect_addrin.sin_addr=opts->udp_params.ip_addr;
+    connect_addrin.sin_port=htons(opts->udp_params.port);
+    connect_addrin.sin_family=AF_INET;
+
+    connect_timeout_rval=connectWithTimeout(sock_data->descriptor_tcp,(struct sockaddr *) &(connect_addrin),sizeof(connect_addrin),TCP_w_SOCKET_CONNECT_TIMEOUT);
+    if(connect_timeout_rval!=0) {
+    	fprintf(stderr,"Error: cannot connect the TCP socket to a server. Please check if any server is running at %s:%" PRIu16 ".\n"
+    		"Details: %s.\n",inet_ntoa(opts->udp_params.ip_addr),opts->udp_params.port,connectWithTimeoutStrError(connect_timeout_rval));
+    	close(sock_data->descriptor_udp);
+    	close(sock_data->descriptor_tcp);
+    	return -2;
     }
 
     memset(&(sock_data->addrto),0,sizeof(sock_data->addrto));
@@ -667,20 +821,69 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 	return dprintf_ret_val;
 }
 
-int writeToUDPSocket(udp_sock_data_t *sock_data,int decimal_digits,perPackerDataStructure *perPktData) {
+int writeToReportSocket(report_sock_data_t *sock_data,int decimal_digits,perPackerDataStructure *perPktData,uint16_t test_id,uint8_t *first_call) {
 	char sockbuff[MAX_w_UDP_SOCK_BUF_SIZE];
+	char sockbuff_tcp[MAX_w_TCP_SOCK_BUF_SIZE];
 	int str_char_count=0;
 	int return_error_code=0;
 
+	if(first_call==NULL) {
+		return -3;
+	}
+
+	if(*first_call) {
+		str_char_count=snprintf(sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE,"LaTeINIT,%" PRIu16 ",fields=",test_id);
+
+		if(perPktData->followup_on_flag==0) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE-str_char_count,"%s",PERPACKET_COMMON_SOCK_HEADER_NO_FOLLOWUP);
+		} else {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE-str_char_count,"%s",PERPACKET_COMMON_SOCK_HEADER_FOLLOWUP);
+		}
+
+		// Tell the receiving application which optional fields are set too
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";pertillnow");
+		}
+
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";fullseq");
+		}
+
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";currmin");
+		}
+
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";currmax");
+		}
+
+		// Send the current data via the TCP socket
+		if(sock_data!=NULL) {
+			if(send(sock_data->descriptor_tcp,sockbuff_tcp,strlen(sockbuff_tcp),0)!=strlen(sockbuff_tcp)) {
+				fprintf(stderr,"%s() error: cannot send the current information via the specified TCP socket (-w).\n",__func__);
+				perror("TCP socket error:");
+				return -3;
+			}
+		} else {
+			fprintf(stderr,"%s() error: no valid TCP socket has been set up for the -w option.\n",__func__);
+			return -4;
+		}
+
+		str_char_count=0;
+		*first_call=0;
+	}
+
 	// Prepare the full string (i.e. the UDP packet content) to be sent via the UDP socket
 	if(perPktData->followup_on_flag==0) {
-		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"seq=%" PRIu64 ",latency=%.*f,tx_timestamp=%ld.%06ld,error=%d",
+		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"LaTe,%" PRIu16 ",%" PRIu64 ",%.*f,%ld.%06ld,%d",
+			test_id,
 			perPktData->seqNo,
 			decimal_digits,(double)(perPktData->signedTripTime)/1000,
 			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
 			perPktData->signedTripTime<=0 ? 1 : 0);
 	} else {
-		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"seq=%" PRIu64 ",latency=%.*f,proctime=%.*f,tx_timestamp=%ld.%06ld,error=%d",
+		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"LaTe,%" PRIu16 "%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d",
+			test_id,
 			perPktData->seqNo,
 			decimal_digits,(double)(perPktData->signedTripTime)/1000,
 			decimal_digits,(double)(perPktData->tripTimeProc)/1000,
@@ -690,30 +893,30 @@ int writeToUDPSocket(udp_sock_data_t *sock_data,int decimal_digits,perPackerData
 
 	// Save the required extra (-X) data too
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
-		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",pertillnow=%.2f",compute_perTillNow(perPktData));
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%.2f",compute_perTillNow(perPktData));
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
-		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",fullseq=%" PRIu64,compute_reconstructedSeqNo(perPktData));
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%" PRIu64,compute_reconstructedSeqNo(perPktData));
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
-		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",currmin=%.*f",decimal_digits,compute_minLatency(perPktData));
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%.*f",decimal_digits,compute_minLatency(perPktData));
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
-		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",currmax=%.*f",decimal_digits,compute_maxLatency(perPktData));
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%.*f",decimal_digits,compute_maxLatency(perPktData));
 	}
 
 	// Send the current data via a UDP socket
 	if(sock_data!=NULL) {
-		if(sendto(sock_data->descriptor,sockbuff,strlen(sockbuff),0,(struct sockaddr *)&(sock_data->addrto),sizeof(struct sockaddr_in))!=strlen(sockbuff)) {
-			fprintf(stderr,"writeToUDPSocket() error: cannot send the current information via the specified UDP socket (-w).\n");
+		if(sendto(sock_data->descriptor_udp,sockbuff,strlen(sockbuff),0,(struct sockaddr *)&(sock_data->addrto),sizeof(struct sockaddr_in))!=strlen(sockbuff)) {
+			fprintf(stderr,"%s() error: cannot send the current information via the specified UDP socket (-w).\n",__func__);
 			perror("UDP socket error:");
 			return_error_code=-1;
 		}
 	} else {
-		fprintf(stderr,"writeToUDPSocket() error: no valid socket has been set up for the -w option.\n");
+		fprintf(stderr,"%s() error: no valid UDP socket has been set up for the -w option.\n",__func__);
 		return_error_code=-2;
 	}
 
@@ -726,8 +929,16 @@ void closeTfile(int Tfiledescriptor) {
 	}
 }
 
-void closeUDPSocket(udp_sock_data_t *sock_data) {
-	if(sock_data!=NULL && sock_data->descriptor>0) {
-		close(sock_data->descriptor);
+void closeReportSocket(report_sock_data_t *sock_data) {
+	if(sock_data==NULL) {
+		return;
+	}
+
+	if(sock_data->descriptor_udp>0) {
+		close(sock_data->descriptor_udp);
+	}
+
+	if(sock_data->descriptor_tcp>0) {
+		close(sock_data->descriptor_tcp);
 	}
 }

@@ -21,6 +21,9 @@
 static consumer_status_t consumerStatus;
 static uint16_t lamp_id_session;
 static modeub_t mode_session;
+// Flag managed internally by writeToReportSocket()
+static uint8_t first_call;
+
 
 static void lampPacketBytesFree(lampPacket_bytes_t *lampPacket) {
 	pn_message_free(lampPacket->msg_ptr);
@@ -88,7 +91,7 @@ static int amqpACKReportSender(lamptype_t type,pn_link_t *lnk,struct amqp_data *
 	return 1;
 }
 
-static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *aData,struct options *opts,udp_sock_data_t *udp_w_data,reportStructure *reportPtr) {
+static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *aData,struct options *opts,report_sock_data_t *sock_w_data,reportStructure *reportPtr) {
 	size_t rx_size;
 	// AMQP message buffer (size: maximum LaMP packet length + ADDITIONAL_AMQP_HEADER_MAX_SIZE)
 	char amqp_message_buf[MAX_LAMP_LEN+ADDITIONAL_AMQP_HEADER_MAX_SIZE];
@@ -198,8 +201,8 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 					writeToTFile(aData->Wfiledescriptor,W_DECIMAL_DIGITS,&(aData->perPktData));
 				}
 
-				if(opts->udp_params.enabled && udp_w_data!=NULL) {
-					writeToUDPSocket(udp_w_data,W_DECIMAL_DIGITS,&(aData->perPktData));
+				if(opts->udp_params.enabled && sock_w_data!=NULL) {
+					writeToReportSocket(sock_w_data,W_DECIMAL_DIGITS,&(aData->perPktData),lamp_id_session,&first_call);
 				}
 				
 			}
@@ -289,7 +292,7 @@ static int amqpInitACKreceiver(lamptype_t type,pn_link_t *lnk,pn_delivery_t *d,s
     return isRightMsgReceived;
 }
 
-static int consumerEventHandler(struct amqp_data *aData,struct options *opts,udp_sock_data_t *udp_w_data,reportStructure *reportPtr,pn_event_t* handled_event) {
+static int consumerEventHandler(struct amqp_data *aData,struct options *opts,report_sock_data_t *sock_w_data,reportStructure *reportPtr,pn_event_t* handled_event) {
 	pn_connection_t* connection;
 	pn_session_t *s;
 	static pn_link_t *l_rx;
@@ -406,7 +409,7 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,udp
 						}
 					} else if(consumerStatus==C_ACKSENT) {
 						// We can start the LaMP UNIDIR packet reception
-						amqpUNIDIRReceiver_retval=amqpUNIDIRReceiver(lnk,e_delivery,aData,opts,udp_w_data,reportPtr);
+						amqpUNIDIRReceiver_retval=amqpUNIDIRReceiver(lnk,e_delivery,aData,opts,sock_w_data,reportPtr);
 
 						if(amqpUNIDIRReceiver_retval==0) {
 							// The test completed successfully, we can now update the consumer status
@@ -428,6 +431,17 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,udp
 							if(amqpACKReportSender(REPORT,l_tx,aData,opts,reportPtr)==-1) {
 								return -1;
 							}
+
+							// Even though only UNIDIR is supported for AMQP 1.0, we are in any case performing the 
+							// 'mode_session==UNIDIR' case, to keep this code compatible with a future implementation 
+							// of "bidirectional" AMQP 1.0 tests
+							if(opts->udp_params.enabled && mode_session==UNIDIR) {
+								// If '-w' was specified and the mode is undirectional, send a LateEND empty packet to make the 
+								// receiving application stop reading the data; this empty packet is triggered by setting the 
+								// second argument (report) to NULL
+								printStatsSocket(opts,NULL,sock_w_data,lamp_id_session);
+							}
+
 							consumerStatus=C_REPORTSENT;
 						}
 					} else if(consumerStatus==C_REPORTSENT) {
@@ -480,7 +494,7 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,udp
 	return 1;
 }
 
-unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, udp_sock_data_t *udp_w_data) {
+unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, report_sock_data_t *sock_w_data) {
 	// LaMP parameters
 	reportStructure reportData;
 
@@ -501,6 +515,11 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, udp_s
 
 	// Consumer status initialization (must be performed here as in daemon mode it should be reset every time the consumer is re-launched)
 	consumerStatus=C_JUSTSTARTED;
+
+	// first_call flag initialization for writeToReportSocket() (only when -w is specified)
+	if(opts->udp_params.enabled) {
+		first_call=1;
+	}
 
 	// Report structure inizialization
 	reportStructureInit(&reportData,0,opts->number,opts->latencyType,opts->followup_mode);
@@ -524,7 +543,7 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, udp_s
 	do {
 		pn_event_batch_t *events_batch=pn_proactor_wait(aData.proactor);
 		for(pn_event_t *e=pn_event_batch_next(events_batch);e!=NULL;e=pn_event_batch_next(events_batch)) {
-			pn_eventhdlr_retval=consumerEventHandler(&aData,opts,udp_w_data,&reportData,e);
+			pn_eventhdlr_retval=consumerEventHandler(&aData,opts,sock_w_data,&reportData,e);
 			if(pn_eventhdlr_retval==-1) {
 				pn_error_condition=1;
 			} else if(pn_eventhdlr_retval==-2) {
