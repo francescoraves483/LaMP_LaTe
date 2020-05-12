@@ -97,6 +97,9 @@ def main (argv):
 	tcp_descriptor.bind((opts.IPv4,opts.port));
 
 	# We are accepting only one connection at a time
+	# This is not mandatory: it was our choice in this example to accept one connection at a time
+	# (In reality, 2 connections will be probably accepted, as the backlog parameter in listen() 
+	# is not very rigid and it is more intended as an "hint" given to the kernel)
 	tcp_descriptor.listen(1);
 
 	# Create a UDP socket

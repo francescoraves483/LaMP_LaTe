@@ -2,7 +2,7 @@
 
 This Python 3 code represents an example of application which receives data through two parallel sockets (a TCP socket and a UDP socket) which are opened when the *-w* option, in LaTe (starting from version *0.1.6-beta, 20200511e*) is specified.
 
-This simple example, even though we tried to made it as complete as possibile, including some error handling, limits itself to printing the received information, but it can be used as a base to build more complex application, using Python but also other programming languages.
+This simple example, even though we tried to made it as complete as possibile, including some error handling, limits itself to printing the received information, but it can be used as a base to build more complex applications, using Python but also other programming languages.
 
 Of course, the logic inside the *.py* file is not intended to be rigid, and it can be adapted depending on your needs, as long as the packets coming from LaTe, when *-w* is specified, are properly handled.
 
