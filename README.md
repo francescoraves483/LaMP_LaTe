@@ -57,3 +57,7 @@ Docker images are also available, launching a LaTe server in daemon mode (see th
 At the moment two images are available: one for testing over wired interfaces and one for testing over wireless interfaces.
 
 **Warning:** Docker images may not include the latest version of LaTe.
+
+
+![](./docs/pics/EU_flag.jpg)
+*Plese have a look also at disclaimer.txt, as this work is also included in the European Union Horizon 2020 project 5G-CARMEN co-funded by the EU*
