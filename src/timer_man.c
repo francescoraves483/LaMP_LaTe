@@ -98,7 +98,13 @@ int timerRearmRandom(int clockFd,struct options *opts) {
 				return -2;
 			}
 
-			rand_val=(double)opts->interval+rand_exponential(opts->rand_param-(double)opts->interval);
+			// Discarding all the values larger than 3*<exponential distribution mean> to avoid 
+			// the extraction of too large numbers, which would result in too large intervals between
+			// packets. Even if this should happen with a low probability, it is necessary to discard
+			// the values which are too large, in order to avoid undesired server-side timeouts.
+			do {
+				rand_val=(double)opts->interval+rand_exponential(opts->rand_param-(double)opts->interval);
+			} while(rand_val>EXPONENTIAL_MEAN_FACTOR*opts->rand_param);
 			break;
 
 		case RAND_NORMAL:

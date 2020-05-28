@@ -42,9 +42,12 @@
 	"\t  following format: <random distribution type character><distrbution parameter>,<optional batch size>\n" \
 	"\t    <random distrbution type character>: can be 'u' for uniform, 'U' for improved uniform (no modulo\n" \
 	"\t      bias but may cause an increase processing time when selecting a new random interval), 'e' for\n" \
-	"\t      exponential, 'n' for a truncated normal between 1 ms and 2*<-t value>-1 ms\n" \
+	"\t      exponential, 'n' for a truncated normal between 1 ms and 2*<-t value>-1 ms.\n" \
 	"\t    <distribution parameter>: it represents the lower limit to select random numbers from for 'u' and 'U',\n" \
-	"\t      the distribution mean for 'e' and the standard deviation for 'n'\n" \
+	"\t      the distribution mean for 'e' and the standard deviation for 'n'; when an exponential distribution is used,\n" \
+	"\t      in order to avoid picking up too large values (even if this would happen with a very low probability),\n" \
+	"\t      the random intervals are limited to ("STRINGIFY(EXPONENTIAL_MEAN_FACTOR)"*mean). If a larger value is extracted it will be discarded and\n" \
+	"\t      a new value will be randomly selected.\n" \
 	"\t    <optional batch size>: the optional batch size, separated from the rest of the string, is optional and\n" \
 	"\t      it can be used to select how many packets should be sent before selecting a new random interval; if\n" \
 	"\t      not specified, "STRINGIFY(BATCH_SIZE_DEF)" packets will be sent with a given random periodicity, before moving to a new random\n" \

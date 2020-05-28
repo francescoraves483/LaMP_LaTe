@@ -68,6 +68,10 @@
 #define NONWLAN_MODE_ANY 2
 #define NONWLAN_MODE_FORCED_NAME 3
 
+// Exponential distribution random interval maximum allowed factor (periodicities larger than this value * mean will be discarded
+// and a new periodicity value will be extracted)
+#define EXPONENTIAL_MEAN_FACTOR 3
+
 // Default batch size when using a random interval (each batch will have the same interval between packets)
 #define BATCH_SIZE_DEF 10
 
