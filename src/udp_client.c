@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <linux/errqueue.h>
 #include "timeval_utils.h"
+#include "carbon_thread_manager.h"
 #include "common_thread.h"
 #include "timer_man.h"
 #include "common_udp.h"
@@ -19,6 +20,9 @@
 static pthread_t txLoop_tid, rxLoop_tid, ackListenerInit_tid, initSender_tid, followupReplyListener_tid, followupRequestSender_tid;
 static uint16_t lamp_id_session;
 static reportStructure reportData;
+static carbonReportStructure carbonReportData;
+static int carbon_metrics_flush_first;
+static carbon_pthread_data_t ctd;
 
 // Transmit error container
 static t_error_types t_tx_error=NO_ERR;
@@ -745,6 +749,23 @@ static void *rxLoop_t (void *arg) {
 				}
 			}
 
+			// When -g is specified, update the Carbon/Graphite report structure
+			// If this is the first time this point is reached, also start the metrics flush thread
+			if(args->opts->carbon_sock_params.enabled) {
+				if(carbon_metrics_flush_first==1) {
+					carbon_metrics_flush_first=0;
+					if(startCarbonTimedThread(&ctd,&carbonReportData,args->opts)<0) {
+						t_rx_error=ERR_CARBON_THREAD;
+						break;
+					}
+				}
+
+				carbon_pthread_mutex_lock(ctd);
+				carbonReportStructureUpdate(&carbonReportData,tripTime);
+				carbon_pthread_mutex_unlock(ctd);
+			}
+
+
 			if(continueFlag==0) {
 				fu_flag=0;
 			}
@@ -898,6 +919,19 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	// Initialize the report structure
 	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
 
+	// Initialize the Carbon report structure, if the -g option is used
+	if(opts->carbon_sock_params.enabled) {
+		if(openCarbonReportSocket(&carbonReportData,opts)<0) {
+			fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
+			return 2;
+		}
+
+		carbonReportStructureInit(&carbonReportData);
+
+		// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
+		carbon_metrics_flush_first=1;
+	}
+
 	// Prepare sendto sockaddr_in structure (index 1) for the client
 	memset(&(sData.addru.addrin[1]),0,sizeof(sData.addru.addrin[1]));
 	sData.addru.addrin[1].sin_family=AF_INET;
@@ -989,6 +1023,11 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 			fprintf(stderr,"Error: some unknown error caused the mode not be set when starting the UDP client.\n");
 			return 1;
 		}
+
+		// Terminate the carbon flush thread
+		if(opts->carbon_sock_params.enabled && t_rx_error!=ERR_CARBON_THREAD) {
+			stopCarbonTimedThread(&ctd);
+		}
 	} else {
 		fprintf(stderr,"Error: the init procedure could not be completed. No test will be performed.\n");
 	}
@@ -1025,6 +1064,10 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	if(opts->udp_params.enabled) {
 		// If '-w' was specified, send the report data inside a TCP packet, through a socket
 		printStatsSocket(opts,&reportData,&(sData.sock_w_data),lamp_id_session);
+	}
+
+	if(opts->carbon_sock_params.enabled) {
+		closeCarbonReportSocket(&carbonReportData);
 	}
 
 	if(!CHECK_SL_NULL(tslist)) {

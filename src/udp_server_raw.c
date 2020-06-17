@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <inttypes.h>
 #include <linux/errqueue.h>
+#include "carbon_thread_manager.h"
 #include "common_thread.h"
 #include "ipcsum_alth.h"
 #include "timer_man.h"
@@ -36,6 +37,10 @@ static modeub_t mode_session;
 static modefollowup_t followup_mode_session;
 static uint16_t client_port_session; // Stored in host byte order
 static uint8_t ack_report_received; // Global flag set by the ackListener thread: = 1 when an ACK has been received, otherwise it is = 0
+
+static carbonReportStructure carbonReportData;
+static int carbon_metrics_flush_first;
+static carbon_pthread_data_t ctd;
 
 // Thread ID for ackListener
 static pthread_t ackListener_tid;
@@ -444,6 +449,24 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		CLEAR_ALL();
 		return 3;
 	}
+
+	// Initialize the carbon report structure (only if the mode is unidirectional, as this is the case
+	// in which the server manages the per-packet statistics)
+	if(mode_session==UNIDIR) {
+		// Initialize the Carbon report structure only if the -g option is used
+		if(opts->carbon_sock_params.enabled) {
+			if(openCarbonReportSocket(&carbonReportData,opts)<0) {
+				fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
+				CLEAR_ALL()
+				return 2;
+			}
+
+			carbonReportStructureInit(&carbonReportData);
+
+			// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
+			carbon_metrics_flush_first=1;
+		}
+	}
 	
 	// -L is ignored if a bidirectional INIT packet was received (it's the client that should compute the latency, not the server)
 	if(mode_session!=UNIDIR && opts->latencyType!=USERTOUSER) {
@@ -723,6 +746,22 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 						writeToReportSocket(&(sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
 					}
 				}
+
+				// When -g is specified, update the Carbon/Graphite report structure
+				// If this is the first time this point is reached, also start the metrics flush thread
+				if(opts->carbon_sock_params.enabled) {
+					if(carbon_metrics_flush_first==1) {
+						carbon_metrics_flush_first=0;
+						if(startCarbonTimedThread(&ctd,&carbonReportData,opts)<0) {
+							t_rx_error=ERR_CARBON_THREAD;
+							break;
+						}
+					}
+
+					carbon_pthread_mutex_lock(ctd);
+					carbonReportStructureUpdate(&carbonReportData,tripTime);
+					carbon_pthread_mutex_unlock(ctd);
+				}
 			break;
 
 			case PINGLIKE:
@@ -834,6 +873,13 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	if(mode_session==UNIDIR) {
+		// Terminate the carbon flush thread
+		// carbon_metrics_flush_first is checked in order to verify if the thread has been created or not
+		// If the thread has been created, the carbon_metrics_flush_first flag should have been set to 0
+		if(opts->carbon_sock_params.enabled && carbon_metrics_flush_first==0) {
+			stopCarbonTimedThread(&ctd);
+		}
+
 		if(Wfiledescriptor>0) {
 			closeTfile(Wfiledescriptor);
 		}
@@ -853,6 +899,12 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 			// receiving application stop reading the data; this empty packet is triggered by setting the 
 			// second argument (report) to NULL
 			printStatsSocket(opts,NULL,&(sData.sock_w_data),lamp_id_session);
+		}
+
+		if(opts->carbon_sock_params.enabled) {
+			// If '-g' was specified and the mode is unidirectional, close the previously opened socket
+			// for flushing metrics to Carbon
+			closeCarbonReportSocket(&carbonReportData);
 		}
 	}
 

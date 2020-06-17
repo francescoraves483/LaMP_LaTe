@@ -1,3 +1,4 @@
+#include "carbon_thread_manager.h"
 #include "common_qpid_proton.h"
 #include "qpid_proton_consumer.h"
 #include "report_manager.h"
@@ -24,6 +25,9 @@ static modeub_t mode_session;
 // Flag managed internally by writeToReportSocket()
 static uint8_t first_call;
 
+static carbonReportStructure carbonReportData;
+static int carbon_metrics_flush_first;
+static carbon_pthread_data_t ctd;
 
 static void lampPacketBytesFree(lampPacket_bytes_t *lampPacket) {
 	pn_message_free(lampPacket->msg_ptr);
@@ -205,6 +209,23 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 					writeToReportSocket(sock_w_data,W_DECIMAL_DIGITS,&(aData->perPktData),lamp_id_session,&first_call);
 				}
 				
+			}
+
+
+			// When -g is specified, update the Carbon/Graphite report structure
+			// If this is the first time this point is reached, also start the metrics flush thread
+			if(opts->carbon_sock_params.enabled) {
+				if(carbon_metrics_flush_first==1) {
+					carbon_metrics_flush_first=0;
+					if(startCarbonTimedThread(&ctd,&carbonReportData,opts)<0) {
+						fprintf(stderr,"Error: cannot start the Carbon/Graphite flush thread. The consumer will be terminated now.\n");
+						return -1;
+					}
+				}
+
+				carbon_pthread_mutex_lock(ctd);
+				carbonReportStructureUpdate(&carbonReportData,tripTime);
+				carbon_pthread_mutex_unlock(ctd);
 			}
 		}
 	}
@@ -442,6 +463,17 @@ static int consumerEventHandler(struct amqp_data *aData,struct options *opts,rep
 								printStatsSocket(opts,NULL,sock_w_data,lamp_id_session);
 							}
 
+							// If '-g' was specified (and the mode is unidirectional), close the previously opened socket
+							// for flushing metrics to Carbon and stop the metrics flush thread (only if it was successfully started,
+							// i.e. if carbon_metrics_flush_first has been set to 0)
+							if(opts->carbon_sock_params.enabled && mode_session==UNIDIR) {
+								if(carbon_metrics_flush_first==0) {
+									stopCarbonTimedThread(&ctd);
+								}
+
+								closeCarbonReportSocket(&carbonReportData);
+							}
+
 							consumerStatus=C_REPORTSENT;
 						}
 					} else if(consumerStatus==C_REPORTSENT) {
@@ -524,6 +556,19 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, repor
 	// Report structure inizialization
 	reportStructureInit(&reportData,0,opts->number,opts->latencyType,opts->followup_mode);
 
+	// Initialize the Carbon report structure, if the -g option is used
+	if(opts->carbon_sock_params.enabled) {
+		if(openCarbonReportSocket(&carbonReportData,opts)<0) {
+			fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
+			return 2;
+		}
+
+		carbonReportStructureInit(&carbonReportData);
+
+		// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
+		carbon_metrics_flush_first=1;
+	}
+
 	// Generate an initial session ID, which will not be used by the LaMP session, but which can be used to generate the
 	//  container ID, sender name and receiver name
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
@@ -563,6 +608,8 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, repor
 		// If '-f' was specified, print the report data to a file too
 		printStatsCSV(opts,&reportData,opts->filename);
 	}
+
+
 
 	// Free Qpid proton allocated memory
 	pn_proactor_free(aData.proactor);

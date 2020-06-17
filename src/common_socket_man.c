@@ -139,6 +139,28 @@ int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct optio
 				sds_retval=0;
 			}
 
+			// When using RAW sockets, retrieve also the source MAC address
+			if(opts->mode_raw==RAW) {
+				strncpy(ifreq.ifr_name,sData->devname,IFNAMSIZ);
+				if(ioctl(dummysFd,SIOCGIFHWADDR,&ifreq)!=-1) {
+					memcpy(addressesptr->srcmacaddr,ifreq.ifr_hwaddr.sa_data,MAC_ADDR_SIZE);
+				} else {
+					fprintf(stderr,"Could not retrieve source MAC address. ioctl() error.\n");
+					return 0;
+				}
+
+				// Check if it was possible to retrieve the right source MAC address
+				if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(addressesptr->srcmacaddr)==MAC_NULL) {
+					fprintf(stderr,"Could not retrieve source MAC address.\n");
+					return 0;
+				} else if(macAddrTypeGet(addressesptr->srcmacaddr)==MAC_ZERO) {
+					// The returned MAC is 00:00:00:00:00:00, i.e. MAC_ZERO, as in the case of a tun interface with no MAC
+					fprintf(stderr,"No valid MAC could be retrieved.\nProbably the selected interface is not an AF_PACKET one and has no MAC address.\n"
+						"Please switch to non-raw sockets.\n");
+					return 0;
+				}
+			}
+
 			close(dummysFd);
 
 			}

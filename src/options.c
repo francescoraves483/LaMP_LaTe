@@ -183,6 +183,30 @@
 	"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n" \
 	"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n" \
 	"\t  'printf' is called before sending a reply.\n"
+#define OPT_g_both \
+	"  -g <options string>: send metrics to Carbon/Graphite (see https://graphiteapp.org/ for more information).\n" \
+	"\t  The <options string> should have the following format:\n" \
+	"\t  <flush interval in seconds>-<IPv4:port[,interface]>-<metrics path>[-<socket type>]\n" \
+	"\t    -<flush interval in seconds> is the interval, in seconds, at which LaTe should send the metrics. LaTe\n" \
+	"\t     will send the average, minimum and maximum values, together with other information such as packet count,\n" \
+	"\t     considering all the packets received between the last time in which the metrics were sent to Carbon and\n" \
+	"\t     the current time instant in which the metrics are currently being sent.\n" \
+	"\t    -<IPv4:port> should specify the IPv4 address and port to which the metrics should be sent. If the port is\n" \
+	"\t     not specified, port "STRINGIFY(DEFAULT_g_SOCKET_PORT)" will be used.\n" \
+	"\t     After <IPv4:port> it is possibile to specify an interface, through its name, to bind the socket to, for instance:\n" \
+	"\t     '192.168.1.101:2003,enp2s0'; if no interface is specified, the socket will be bound to all interfaces.\n" \
+	"\t    -<metrics path> should be subsituted withj the Carbon/Graphite metrics path. An additional path component\n" \
+	"\t     will be appended, depending on the type of flushed metric (i.e. '.avg' for the average values, '.stdev' for\n" \
+	"\t     the standard deviation, and so on).\n" \
+	"\t    -<socket type> can optionally be used to force a UDP or TCP socket to be used. The character 't' should be\n" \
+	"\t     specied for TCP and 'u' for UDP. By default, a TCP socket is used.\n" \
+	"\t  The flush interval should correspond to a correctly configured Carbon retetion rate, in storage-schemas.conf.\n" \
+	"\t  To avoid losing any data, the flush interval should be >= than the highest resolution retention rate in Carbon.\n" \
+	"\t  The plaintext protocol is currently used for sending the metrics to Carbon. For more information see:\n" \
+	"\t  https://graphite.readthedocs.io/en/latest/feeding-carbon.html#the-plaintext-protocol\n" \
+	"\t  Example (assuming a Carbon plaintext reciver running on loopback and listening on port 2003, flush interval = 2s): \n" \
+	"\t  '-g 2-127.0.0.1:2003-test.metrics.late' (TCP socket)\n" \
+	"\t  '-g 2-127.0.0.1:2003-test.metrics.late-u' (UDP socket)\n"
 
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
@@ -203,6 +227,85 @@ static int strchr_w_opt(char *str, size_t str_len, char character) {
 	}
 
 	return found;
+}
+
+static int sock_params_parser(struct sock_params *sock_params_data, char *optarg, char option_char) {
+	char *str_ptr;
+	int opt_devnameLen=0;
+	char *saveptr_strtok=NULL;
+	uint8_t specified_fields=0x00;
+	size_t optargLen=0;
+	long port_long;
+
+	// Check if the specified string has a valid size (it should contain at least an IP address, i.e. a minimum of 7 characters + '\0' in the worst case, and
+	// it should be shorter than MAX_w_STRING_SIZE, as defined in options.h)
+	optargLen=strlen(optarg)+1;
+
+	if(optargLen<8 || optargLen>MAX_w_STRING_SIZE) {
+		fprintf(stderr,"Error: the argument specified after -w is either too short or too long. Size: %zu, admitted sizes: [7,%d].\n",optargLen-1,MAX_w_STRING_SIZE-1);
+		fprintf(stderr,"If you specified an interface name, please check if it is correct.\n");
+		return 0;
+	}
+
+	// Check if an interface is specified directly after the IP address (i.e. a ',' is encountered instead of ':',
+	// which is used to separate the port from the IP address)
+	// In order to do so, we discriminate different cases setting different bits of specified_fields:
+	// 1) If at least one ':' is found, we can infer that the port has been specified (set bit 1 in specified_fields)
+	// 2) If one ',' is found, we can infer that an interface name has been specified (set bit 2 in specified_fields)
+	// If both bits are set, we can conclude that both port and interface name were specified (both bit 1 and bit 2 are set)
+	if(strchr_w_opt(optarg,optargLen,':')) {
+		specified_fields |= 0x01;
+	}
+
+	if(strchr_w_opt(optarg,optargLen,',')) {
+		specified_fields |= 0x02;
+	}
+
+	str_ptr=strtok_r(optarg,":,",&saveptr_strtok);
+
+	// Parse IP addresss
+	if(str_ptr==NULL || inet_pton(AF_INET,str_ptr,&(sock_params_data->ip_addr))!=1) {
+		fprintf(stderr,"Error in parsing the destination IP address for the UDP socket (-%c option).\n",option_char);
+		return 0;
+	}
+	
+	// If bit 1 in specified_fields is set, parse port number
+	if(specified_fields & 0x01) {
+		str_ptr=strtok_r(NULL,":,",&saveptr_strtok);
+
+		if(str_ptr!=NULL) {
+			if(sscanf(str_ptr,"%ld",&port_long)!=1 || port_long<1 || port_long>65535) {
+				fprintf(stderr,"Error in parsing the port for the UDP socket (-%c option). Bad value?\n",option_char);
+				return 0;
+			}
+			sock_params_data->port=(uint16_t) port_long;
+		}
+	}
+
+	// If bit 2 in specified_fields is set, parse the interface name
+	if(specified_fields & 0x02) {
+		str_ptr=strtok_r(NULL,":,",&saveptr_strtok);
+
+		if(str_ptr!=NULL) {
+			opt_devnameLen=strlen(str_ptr)+1;
+			if(opt_devnameLen>1) {
+				sock_params_data->devname=malloc(opt_devnameLen*sizeof(char));
+				if(!sock_params_data->devname) {
+					fprintf(stderr,"Error in parsing the interface name for the UDP socket (-%c option): cannot allocate memory.\n",option_char);
+					fprintf(stderr,"If this error persists, try not specifying any interface and bind to all the available ones.\n");
+					return 0;
+				}
+				strncpy(sock_params_data->devname,str_ptr,opt_devnameLen);
+			} else {
+				fprintf(stderr,"Error in parsing the interface name for the UDP socket (-%c option): null string length.\n",option_char);
+				return 0;
+			}
+		}
+	}
+
+	sock_params_data->enabled=1;
+
+	return 1;
 }
 
 static void print_long_info(void) {
@@ -265,6 +368,8 @@ static void print_long_info(void) {
 
 			// File options
 			OPT_f_client
+			OPT_g_both
+			"\t  This options applies to a client only in ping-like mode.\n"
 			OPT_o_client
 			OPT_w_both
 			"\t  When in unidirectional mode, no per-packet data or 'LaTeINIT' is sent with -w, as they are managed by\n"
@@ -309,6 +414,8 @@ static void print_long_info(void) {
 			OPT_1_server
 
 			// File options
+			OPT_g_both
+			"\t  This options applies to a server only in unidirectional mode.\n"
 			OPT_w_both
 			"\t  This options applies to a server only in unidirectional mode; in this case, 'LaTeEND' won't contain\n"
 			"\t  any final report, but it will just be formatted as 'LaTe,<LaMP ID>,srvtermination' and it can be used\n"
@@ -448,6 +555,17 @@ void options_initialize(struct options *options) {
 	options->udp_params.port=DEFAULT_W_SOCKET_PORT;
 	options->udp_params.devname=NULL;
 	options->udp_params.enabled=0;
+
+	// Carbon/Graphite -g data flush interval
+	options->carbon_interval=0;
+	// -g socket parameters
+	options->carbon_sock_params.port=DEFAULT_g_SOCKET_PORT;
+	options->carbon_sock_params.devname=NULL;
+	options->carbon_sock_params.enabled=0;
+	// -g metric path
+	options->carbon_metric_path=NULL;
+	// -g default socket type (TCP)
+	options->carbon_sock_type=G_TCP;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -660,81 +778,69 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				break;
 
 			case 'w':
+				if(!sock_params_parser(&(options->udp_params),optarg,char_option)) {
+					print_short_info_err(options);
+				}
+				break;
+
+			case 'g':
 				{
-				char *str_ptr;
-				int opt_devnameLen=0;
-				char *saveptr_strtok=NULL;
-				uint8_t specified_fields=0x00;
-				size_t optargLen=0;
-				long port_long;
+				char optarg_socket_buf[MAX_w_STRING_SIZE]={0};
+				char optarg_metric_path_buf[MAX_g_METRIC_PATH_LEN]={0};
+				int optarg_metric_path_len=0;
+				char sock_type='t';
+				char sscanf_format[32];
 
-				// Check if the specified string has a valid size (it should contain at least an IP address, i.e. a minimum of 7 characters + '\0' in the worst case, and
-				// it should be shorter than MAX_w_STRING_SIZE, as defined in options.h)
-				optargLen=strlen(optarg)+1;
+				// Preparing the sscanf format string, as it has a value which depends on a constant defined
+				// elsewhere (MAX_w_STRING_SIZE)
+				snprintf(sscanf_format,sizeof(sscanf_format),"%%u-%%%zu[^-]-%%%zu[^-]-%%c",(size_t) MAX_w_STRING_SIZE-1,(size_t) MAX_g_METRIC_PATH_LEN-1);
 
-				if(optargLen<8 || optargLen>MAX_w_STRING_SIZE) {
-					fprintf(stderr,"Error: the argument specified after -w is either too short or too long. Size: %zu, admitted sizes: [7,%d].\n",optargLen-1,MAX_w_STRING_SIZE-1);
-					fprintf(stderr,"If you specified an interface name, please check if it is correct.\n");
+				if(sscanf(optarg,sscanf_format,
+					&(options->carbon_interval),
+					optarg_socket_buf,
+					optarg_metric_path_buf,
+					&sock_type)<3) {
+					fprintf(stderr,"Error parsing the graphite (-g) option. Some values are probably missing.\n"
+						"Please use the -h option to understand how to format the string to be specified after -g.\n");
 					print_short_info_err(options);
 				}
 
-				// Check if an interface is specified directly after the IP address (i.e. a ',' is encountered instead of ':',
-				// which is used to separate the port from the IP address)
-				// In order to do so, we discriminate different cases setting different bits of specified_fields:
-				// 1) If at least one ':' is found, we can infer that the port has been specified (set bit 1 in specified_fields)
-				// 2) If one ',' is found, we can infer that an interface name has been specified (set bit 2 in specified_fields)
-				// If both bits are set, we can conclude that both port and interface name were specified (both bit 1 and bit 2 are set)
-				if(strchr_w_opt(optarg,optargLen,':')) {
-					specified_fields |= 0x01;
-				}
+				// Parse the metric path string
+				optarg_metric_path_len=strlen(optarg_metric_path_buf)+1;
+				options->carbon_metric_path=malloc(optarg_metric_path_len*sizeof(char));
 
-				if(strchr_w_opt(optarg,optargLen,',')) {
-					specified_fields |= 0x02;
-				}
-
-				str_ptr=strtok_r(optarg,":,",&saveptr_strtok);
-
-				// Parse IP addresss
-				if(str_ptr==NULL || inet_pton(AF_INET,str_ptr,&(options->udp_params.ip_addr))!=1) {
-					fprintf(stderr,"Error in parsing the destination IP address for the UDP socket (-w option).\n");
+				if(!options->carbon_metric_path) {
+					fprintf(stderr,"Error: cannot parse the metric path (-g option): unable to allocate memory.\n");
 					print_short_info_err(options);
 				}
-				
-				// If bit 1 in specified_fields is set, parse port number
-				if(specified_fields & 0x01) {
-					str_ptr=strtok_r(NULL,":,",&saveptr_strtok);
 
-					if(str_ptr!=NULL) {
-						if(sscanf(str_ptr,"%ld",&port_long)!=1 || port_long<1 || port_long>65535) {
-							fprintf(stderr,"Error in parsing the port for the UDP socket (-w option). Bad value?\n");
-							print_short_info_err(options);
-						}
-						options->udp_params.port=(uint16_t) port_long;
-					}
+				memcpy(options->carbon_metric_path,optarg_metric_path_buf,optarg_metric_path_len);
+
+				// Check if the specified interval is correct
+				if(options->carbon_interval==0) {
+					fprintf(stderr,"Error: cannot parse the flush interval for sending metrics to Carbon/Graphite (-g option).\n");
+					print_short_info_err(options);
 				}
 
-				// If bit 2 in specified_fields is set, parse the interface name
-				if(specified_fields & 0x02) {
-					str_ptr=strtok_r(NULL,":,",&saveptr_strtok);
-
-					if(str_ptr!=NULL) {
-						opt_devnameLen=strlen(str_ptr)+1;
-						if(opt_devnameLen>1) {
-							options->udp_params.devname=malloc(opt_devnameLen*sizeof(char));
-							if(!options->udp_params.devname) {
-								fprintf(stderr,"Error in parsing the interface name for the UDP socket (-w option): cannot allocate memory.\n");
-								fprintf(stderr,"If this error persists, try not specifying any interface and bind to all the available ones.\n");
-								print_short_info_err(options);
-							}
-							strncpy(options->udp_params.devname,str_ptr,opt_devnameLen);
-						} else {
-							fprintf(stderr,"Error in parsing the interface name for the UDP socket (-w option): null string length.\n");
-							print_short_info_err(options);
-						}
-					}
+				// Parse the socket parameters
+				if(!sock_params_parser(&(options->carbon_sock_params),optarg_socket_buf,char_option)) {
+					print_short_info_err(options);
 				}
 
-				options->udp_params.enabled=1;
+				switch(sock_type) {
+					case 't':
+						options->carbon_sock_type=G_TCP;
+						break;
+
+					case 'u':
+						options->carbon_sock_type=G_UDP;
+						break;
+
+					default:
+						fprintf(stderr,"Error. '%c' is not a valid socket type identifier (-g option).\n"
+						"Valid socket types are 't' for TCP (default) or 'u' for UDP.\n",sock_type);
+							print_short_info_err(options);
+				}
 
 				}
 				break;
@@ -1405,6 +1511,14 @@ void options_free(struct options *options) {
 
 	if(options->udp_params.enabled==1 && options->udp_params.devname) {
 		free(options->udp_params.devname);
+	}
+
+	if(options->carbon_sock_params.enabled==1 && options->carbon_sock_params.devname) {
+		free(options->carbon_sock_params.devname);
+	}
+
+	if(options->carbon_metric_path) {
+		free(options->carbon_metric_path);
 	}
 
 	#if AMQP_1_0_ENABLED

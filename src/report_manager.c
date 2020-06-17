@@ -158,7 +158,7 @@ static double tsCalculator(int dof, int intervalIndex) {
 }
 
 static inline struct tm *getLocalTime(void) {
-	time_t currtime = time(NULL);
+	time_t currtime=time(NULL);
 
 	return localtime(&currtime);
 }

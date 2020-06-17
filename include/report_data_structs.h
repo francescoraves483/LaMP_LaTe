@@ -50,4 +50,17 @@ typedef struct perPackerDataStructure {
 	reportStructure *reportDataPointer;
 } perPackerDataStructure;
 
+typedef struct carbonReportStructure {
+	uint64_t minLatency;		// us
+	double averageLatency;		// us
+	uint64_t maxLatency;		// us
+	double variance;			// us
+	uint64_t packetCount;		// #
+	uint64_t errorsCount;		// #
+	double _welfordM2;					// us - not transmitted/not printed (used for the variance computation)
+	double _welfordAverageLatencyOld;	// us - not transmitted/not printed (used for the variance computation)
+
+	int socketDescriptor;		// written only once when opening the socket to Carbon/Graphite with openCarbonReportSocket() in carbon_report_manager.h/.c
+} carbonReportStructure;
+
 #endif // LATENCYTEST_REPORTDATASTRUCTS_H_INCLUDED

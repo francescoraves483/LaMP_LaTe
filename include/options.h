@@ -11,9 +11,9 @@
 // Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
 // If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:X:A:BC:FM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:X:A:BC:FM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:q:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:q:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -34,6 +34,7 @@
 
 #define DEFAULT_LATE_PORT 46000
 #define DEFAULT_W_SOCKET_PORT 46001
+#define DEFAULT_g_SOCKET_PORT 2003
 #define MAX_PAYLOAD_SIZE_UDP_LAMP 1448 // Set to 1448 B since: 20 B (IP hdr) + 8 B (UDP hdr) + 24 B (LaMP hdr) + 1448 B (payload) = 1500 B (MTU)
 #define RAW_RX_PACKET_BUF_SIZE (ETHERMTU+14) // Ethernet MTU (1500 B) + 14 B of struct ether_header
 #define MIN_TIMEOUT_VAL_S 1000 // Minimum timeout value for the server (in ms)
@@ -51,6 +52,9 @@
 // Number of decimal digits to be reported in the CSV file when in "-W" mode
 #define W_DECIMAL_DIGITS 3 // [#]
 
+// Number of decimal digits to be sent to Carbon/Graphite when "-g" is enabled
+#define g_DECIMAL_DIGITS 5 // [#]
+
 // Default confidence interval mask
 #define DEF_CONFIDENCE_INTERVAL_MASK 2
 
@@ -61,6 +65,9 @@
 #define MAX_w_UDP_SOCK_BUF_SIZE 1472
 // Maximum TCP buffer size for the -w option
 #define MAX_w_TCP_SOCK_BUF_SIZE 1472
+
+// Maximum buffer size for the -g option's socket
+#define MAX_g_SOCK_BUF_SIZE 1472
 
 // nonwlan_mode values (defined here for readability reasons)
 #define NONWLAN_MODE_WIRELESS 0
@@ -80,8 +87,14 @@
 // two special chacters (':' and ',') + IFNAMSIZ (which takes into account the maximum interface name size + '\0')
 #define MAX_w_STRING_SIZE (22+IFNAMSIZ)
 
+// Maximum supported length for a metric path specified by the user, when the -g option (to send data to Carbon/Graphite) is used
+#define MAX_g_METRIC_PATH_LEN 255
+
 // -w TCP socket timeout (in ms)
 #define TCP_w_SOCKET_CONNECT_TIMEOUT 5000
+
+// -g TCP socket timeout (in ms)
+#define TCP_g_SOCKET_CONNECT_TIMEOUT 5000
 
 // Char <-> shift mapping for SET_REPORT_EXTRA_DATA_BIT
 // To use SET_REPORT_EXTRA_DATA_BIT() you should specify the report_extra_data variable and one of these macros
@@ -137,6 +150,18 @@ typedef enum {
 	RAW
 } moderaw_t;
 
+typedef enum {
+	G_TCP,
+	G_UDP
+} graphite_sock_t;
+
+struct sock_params {
+	uint16_t port;
+	struct in_addr ip_addr;
+	char *devname;
+	int enabled;
+};
+
 struct options {
 	uint8_t init;
 	protocol_t protocol;
@@ -189,13 +214,17 @@ struct options {
 	// All the reserved bits are ignored, no matter the value they assume
 	uint16_t report_extra_data;
 
-	// -w UDP socket parameters
-	struct _udp_params {
-		uint16_t port;
-		struct in_addr ip_addr;
-		char *devname;
-		int enabled;
-	} udp_params;
+	// -w UDP/TCP socket parameters
+	struct sock_params udp_params;
+
+	// -g (output to Carbon/Graphite) interval - it should be set depending on the Graphite Carbon retention rates setting
+	unsigned int carbon_interval;
+	// -g metric path
+	char *carbon_metric_path;
+
+	// -g UDP/TCP socket parameters and type
+	struct sock_params carbon_sock_params;
+	graphite_sock_t carbon_sock_type; // It should be equal to G_TCP if a TCP socket should be used (default), or to G_UDP if a UDP socket should be used
 };
 
 void options_initialize(struct options *options);

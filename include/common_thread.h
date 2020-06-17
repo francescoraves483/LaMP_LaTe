@@ -69,7 +69,8 @@ typedef enum {
 	ERR_MALLOC,
 	ERR_RECVFROM_GENERIC,
 	ERR_TXSTAMP,
-	ERR_CLEAR_TIMER_EVENT
+	ERR_CLEAR_TIMER_EVENT,
+	ERR_CARBON_THREAD
 } t_error_types;
 
 void thread_error_print(const char *name, t_error_types err);
