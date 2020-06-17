@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 // Still to be performed:
-//  - error management
+//  - better error management
 static void *flush_loop (void *arg) {
 	struct flush_callback_args *flush_loop_args=(struct flush_callback_args *) arg;
 	struct timespec now;

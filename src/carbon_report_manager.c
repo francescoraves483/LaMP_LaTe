@@ -107,7 +107,7 @@ int carbonReportStructureFlush(carbonReportStructure *report,struct options *opt
 		return -3;
 	}
 
-	// Prepare buffer for the standard deviation
+	// Prepare buffer for the packet count
 	snprintf(sockbuff,MAX_g_SOCK_BUF_SIZE,"%s.count %" PRIu64 " %" PRIu64 "\n",opts->carbon_metric_path,report->packetCount,now.tv_sec);
 
 	// Send to Graphite
@@ -116,7 +116,7 @@ int carbonReportStructureFlush(carbonReportStructure *report,struct options *opt
 		return -3;
 	}
 
-	// Prepare buffer for the standard deviation
+	// Prepare buffer for the error count
 	snprintf(sockbuff,MAX_g_SOCK_BUF_SIZE,"%s.errors %" PRIu64 " %" PRIu64 "\n",opts->carbon_metric_path,report->errorsCount,now.tv_sec);
 
 	// Send to Graphite
