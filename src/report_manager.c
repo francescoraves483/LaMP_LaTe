@@ -196,6 +196,7 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 }
 
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber) {
+	uint8_t seqNumberResetOccurred=0;
 	report->packetCount++;
 
 	if(tripTime!=0) {
@@ -203,11 +204,14 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 		if(report->_isFirstUpdate==1) {
 			report->lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
 			report->_isFirstUpdate=0;
+
+			seqNumberResetOccurred=1; // Forcing this to '1' as, at the beginning, we should not check for out of order packets
 		} else {
 			// Try to infer if a sequence number reset occurred
 			// This operation is placed here as it is applicable only when this is not the first report update
 			if((int32_t)seqNumber-(int32_t)report->lastSeqNumber<-SEQUENCE_NUMBERS_RESET_THRESHOLD) {
 				report->seqNumberResets++;
+				seqNumberResetOccurred=1;
 			}
 		}
 
@@ -223,10 +227,8 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 		}
 
 		// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets.
-		// The out of order count is related here to the number of times a decreasing sequence number is detected.
-		// When the last sequence number is 65535 (UINT16_MAX), due to cyclic numbers, the expected current one is 0
-		// This should not be detected as an error, as it is the only situation in which a decreasing sequence number is expected
-		if(report->lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->lastSeqNumber) {
+		// It should not be detected if a normal cyclical reset of sequence numbers has occurred
+		if(seqNumberResetOccurred==0 && seqNumber<=report->lastSeqNumber) {
 			report->outOfOrderCount++;
 		}
 
