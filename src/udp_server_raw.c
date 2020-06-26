@@ -429,7 +429,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	// Report structure inizialization
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode, opts->dup_detect_enabled);
 
 	// Populate the 'args' struct
 	args.sData=sData;
@@ -461,7 +461,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				return 2;
 			}
 
-			carbonReportStructureInit(&carbonReportData);
+			carbonReportStructureInit(&carbonReportData,opts);
 
 			// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
 			carbon_metrics_flush_first=1;
@@ -759,7 +759,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 					}
 
 					carbon_pthread_mutex_lock(ctd);
-					carbonReportStructureUpdate(&carbonReportData,tripTime);
+					carbonReportStructureUpdate(&carbonReportData,tripTime,lamp_seq_rx,opts->dup_detect_enabled);
 					carbon_pthread_mutex_unlock(ctd);
 				}
 			break;
@@ -904,9 +904,12 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		if(opts->carbon_sock_params.enabled) {
 			// If '-g' was specified and the mode is unidirectional, close the previously opened socket
 			// for flushing metrics to Carbon
+			carbonReportStructureFree(&carbonReportData,opts);
 			closeCarbonReportSocket(&carbonReportData);
 		}
 	}
+
+	reportStructureFree(&reportData);
 
 	// Destroy mutex (as it is no longer needed) and clear all the other data that should be clared (see the CLEAR_ALL() macro)
 	CLEAR_ALL();

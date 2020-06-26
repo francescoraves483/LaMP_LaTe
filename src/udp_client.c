@@ -260,7 +260,7 @@ static void txLoop (arg_struct_udp *args) {
 			ctrl=CTRL_UNIDIR_CONTINUE;
 		}
 	}
-	lampHeadPopulate(&lampHeader, ctrl, lamp_id_session, 0); // Starting from sequence number = 0
+	lampHeadPopulate(&lampHeader, ctrl, lamp_id_session, INITIAL_SEQ_NO); // Starting from sequence number = 0
 
 	// Allocating packet buffers (with and without payload)
 	if(args->opts->payloadlen!=0) {
@@ -707,7 +707,8 @@ static void *rxLoop_t (void *arg) {
 		}
 
 		// When using the follow-up mode, data is printed only when both the reply and the follow-up have been received
-		if(args->opts->followup_mode==FOLLOWUP_OFF || (args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA)) {
+		if((args->opts->followup_mode==FOLLOWUP_OFF && (lamp_type_rx==PINGLIKE_REPLY || lamp_type_rx==PINGLIKE_ENDREPLY || lamp_type_rx==PINGLIKE_REPLY_TLESS || lamp_type_rx==PINGLIKE_ENDREPLY_TLESS)) || 
+			(args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA)) {
 			if(tripTime!=0) {
 				fprintf(stdout,"Received a reply from %s (id=%u, seq=%u). Time: %.3f ms (%s)%s\n",
 					inet_ntoa(srcAddr.sin_addr),lamp_id_rx,lamp_seq_rx,(double)tripTime/1000,latencyTypePrinter(args->opts->latencyType),
@@ -761,7 +762,7 @@ static void *rxLoop_t (void *arg) {
 				}
 
 				carbon_pthread_mutex_lock(ctd);
-				carbonReportStructureUpdate(&carbonReportData,tripTime);
+				carbonReportStructureUpdate(&carbonReportData,tripTime,lamp_seq_rx,args->opts->dup_detect_enabled);
 				carbon_pthread_mutex_unlock(ctd);
 			}
 
@@ -917,7 +918,7 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	}
 
 	// Initialize the report structure
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode, opts->dup_detect_enabled);
 
 	// Initialize the Carbon report structure, if the -g option is used
 	if(opts->carbon_sock_params.enabled) {
@@ -926,7 +927,7 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 			return 2;
 		}
 
-		carbonReportStructureInit(&carbonReportData);
+		carbonReportStructureInit(&carbonReportData,opts);
 
 		// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
 		carbon_metrics_flush_first=1;
@@ -1067,8 +1068,11 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	}
 
 	if(opts->carbon_sock_params.enabled) {
+		carbonReportStructureFree(&carbonReportData,opts);
 		closeCarbonReportSocket(&carbonReportData);
 	}
+
+	reportStructureFree(&reportData);
 
 	if(!CHECK_SL_NULL(tslist)) {
 		timevalSL_free(tslist);

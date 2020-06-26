@@ -69,7 +69,7 @@ static int amqpControlSender(lamptype_t type,pn_link_t *lnk,struct amqp_data *aD
 		return -1;
 	}
 
-	lampHeadPopulate(&lampHeader,TYPE_TO_CTRL(type),lamp_id_session,0);
+	lampHeadPopulate(&lampHeader,TYPE_TO_CTRL(type),lamp_id_session,INITIAL_SEQ_NO);
 
 	if(type==INIT) {
 		lampHeadSetConnType(&lampHeader,opts->mode_ub);
@@ -494,7 +494,7 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts, repor
 	fprintf(stdout,"\t[session LaMP ID] = %" PRIu16 "\n\n",lamp_id_session);
 
 	// Initialize the report structure
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode, opts->dup_detect_enabled);
 
 	// Set container ID, sender name and received name, depending on the chosen LaMP ID
 	snprintf(aData.containerID,CONTAINERID_LEN,"LaTe_prod_%05" PRIu16,lamp_id_session);
@@ -537,6 +537,8 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts, repor
 			printStatsSocket(opts,&reportData,sock_w_data,lamp_id_session);
 		}
 	}
+
+	reportStructureFree(&reportData);
 
 	// Free Qpid proton allocated memory
 	pn_proactor_free(aData.proactor);

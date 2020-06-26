@@ -207,6 +207,13 @@
 	"\t  Example (assuming a Carbon plaintext reciver running on loopback and listening on port 2003, flush interval = 2s): \n" \
 	"\t  '-g 2-127.0.0.1:2003-test.metrics.late' (TCP socket)\n" \
 	"\t  '-g 2-127.0.0.1:2003-test.metrics.late-u' (UDP socket)\n"
+#define OPT_D_both \
+	"  -D: disable duplicate packet detection. Starting from LaTe 0.1.6, 20200626l, duplicated packets detection is enabled\n" \
+	"\t  by default. This, however, slightly increases the computational cost. If performance is a highly critical factor\n" \
+	"\t  and the network which is being tested is not affected by duplicated packets, this option can be used to disable\n" \
+	"\t  the duplicate packet detection.\n" \
+	"\t  Remember that, when -D is used and several duplicated packets are present, the packet loss estimation may be inaccurate\n" \
+	"\t  or, in the worst case, wrong. In this case, duplicated packets are normally considered as \"out of order\".\n"
 
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
@@ -359,6 +366,7 @@ static void print_long_info(void) {
 			OPT_t_client
 			OPT_A_both
 			OPT_C_client
+			OPT_D_both
 			OPT_F_client
 			OPT_L_client
 			OPT_P_client
@@ -408,6 +416,7 @@ static void print_long_info(void) {
 			OPT_r_both
 			OPT_t_server
 			OPT_A_both
+			OPT_D_both
 			OPT_L_server
 			OPT_V_both
 			OPT_0_server
@@ -566,6 +575,8 @@ void options_initialize(struct options *options) {
 	options->carbon_metric_path=NULL;
 	// -g default socket type (TCP)
 	options->carbon_sock_type=G_TCP;
+
+	options->dup_detect_enabled=1;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -843,6 +854,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				}
 
 				}
+				break;
+
+			case 'D':
+				options->dup_detect_enabled=0;
 				break;
 
 			#if AMQP_1_0_ENABLED
@@ -1230,6 +1245,9 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(options->printAfter==1) {
 			fprintf(stderr,"Warning: -1 was specified but it will be ignored, as it is a server only option.\n");
 		}
+		if(options->mode_ub==UNIDIR && options->dup_detect_enabled) {
+			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
+		}
 	} else if(options->mode_cs==SERVER) {
 		if(options->mode_ub!=UNSET_MUB) {
 			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
@@ -1259,6 +1277,9 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(options->printAfter==1) {
 			fprintf(stderr,"Warning: -1 was specified but it will be ignored, as it is a server only option.\n");
+		}
+		if(options->mode_ub==UNIDIR && options->dup_detect_enabled) {
+			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
 		}
 	} else if(options->mode_cs==LOOPBACK_SERVER) {
 		if(eI_flag==1) {
@@ -1376,6 +1397,15 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	}
 
 	// Important note: when adding futher protocols that cannot support, somehow, raw sockets, always check for -r not being set
+
+	// When -g is used, forbid too large flush intervals (i.e. intervals in which the could be more than one cyclical sequence numbers reset - with some margin)
+	if(options->carbon_sock_params.enabled && options->carbon_interval>=(unsigned int)(options->interval*((double)UINT16_MAX/2000.0))) {
+		fprintf(stderr,"Error: the flush interval is too large."
+			"Specified value: %u s - Maximum value for the current periodicity: %u s\n",
+			options->carbon_interval,
+			(unsigned int)(options->interval*((double)UINT16_MAX/1000.0)));
+		print_short_info_err(options);
+	}
 
 	// Check for -L and -B/-U consistency (-L supported only with -B in clients, -L supported only with -U in servers, otherwise, it is ignored)
 	if(L_flag==1 && (options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT) && options->mode_ub!=PINGLIKE) {

@@ -224,7 +224,7 @@ static int amqpUNIDIRReceiver(pn_link_t *lnk,pn_delivery_t *d,struct amqp_data *
 				}
 
 				carbon_pthread_mutex_lock(ctd);
-				carbonReportStructureUpdate(&carbonReportData,tripTime);
+				carbonReportStructureUpdate(&carbonReportData,tripTime,lamp_seq_rx,opts->dup_detect_enabled);
 				carbon_pthread_mutex_unlock(ctd);
 			}
 		}
@@ -553,22 +553,6 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, repor
 		first_call=1;
 	}
 
-	// Report structure inizialization
-	reportStructureInit(&reportData,0,opts->number,opts->latencyType,opts->followup_mode);
-
-	// Initialize the Carbon report structure, if the -g option is used
-	if(opts->carbon_sock_params.enabled) {
-		if(openCarbonReportSocket(&carbonReportData,opts)<0) {
-			fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
-			return 2;
-		}
-
-		carbonReportStructureInit(&carbonReportData);
-
-		// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
-		carbon_metrics_flush_first=1;
-	}
-
 	// Generate an initial session ID, which will not be used by the LaMP session, but which can be used to generate the
 	//  container ID, sender name and receiver name
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
@@ -577,7 +561,20 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, repor
 	fprintf(stdout,"\t[initial session LaMP ID for AMQP] = %" PRIu16 "\n\n",lamp_id_session);
 
 	// Initialize the report structure
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+	reportStructureInit(&reportData,0,opts->number,opts->latencyType,opts->followup_mode,opts->dup_detect_enabled);
+
+	// Initialize the Carbon report structure, if the -g option is used
+	if(opts->carbon_sock_params.enabled) {
+		if(openCarbonReportSocket(&carbonReportData,opts)<0) {
+			fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
+			return 2;
+		}
+
+		carbonReportStructureInit(&carbonReportData,opts);
+
+		// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
+		carbon_metrics_flush_first=1;
+	}
 
 	// Set container ID, sender name and received name, depending on the chosen LaMP ID
 	snprintf(aData.containerID,CONTAINERID_LEN,"LaTe_cons_%05" PRIu16,lamp_id_session);
@@ -609,7 +606,11 @@ unsigned int runAMQPconsumer(struct amqp_data aData, struct options *opts, repor
 		printStatsCSV(opts,&reportData,opts->filename);
 	}
 
+	if(opts->carbon_sock_params.enabled) {
+		carbonReportStructureFree(&carbonReportData,opts);
+	}
 
+	reportStructureFree(&reportData);
 
 	// Free Qpid proton allocated memory
 	pn_proactor_free(aData.proactor);

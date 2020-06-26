@@ -10,8 +10,8 @@
 #include "options.h"
 #include "report_data_structs.h"
 
-// Taking into account 20 characters to represent each 64 bit number + 5 characters to represent a 16 bit nummber + 3 characters to represent a 8 bit nummber + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 10 '-' chacaters=20*6+6+25*2+1+10=158 + some margin = 201
-#define REPORT_BUFF_SIZE 201
+// Taking into account 20 characters to represent each 64 bit number + 10 characters to represent a 32 bit number + 3 characters to represent a 8 bit nummber + 20 characters and 5 decimal digits for each double (forced inside sprintf) + 1 character for layency type + 12 '-' chacaters=20*7+10+3*2+25*2+1+12=219 + some margin = 225
+#define REPORT_BUFF_SIZE 225
 
 #define CONFINT_NUMBER 3
 
@@ -29,25 +29,25 @@
 #define PERPACKET_COMMON_SOCK_HEADER_NO_FOLLOWUP "seq;latency;tx_timestamp;error"
 #define PERPACKET_COMMON_SOCK_HEADER_FOLLOWUP "seq;latency;est_proctime;tx_timestamp;error"
 
-// Expected negative gap to detect a reset in the cyclical sequence numbers
-#define SEQUENCE_NUMBERS_RESET_THRESHOLD 10000
-
 // Macro to write the report into a string
-#define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf-%" PRIu16 "-%" PRIu64 "-%" PRIu8, \
+#define repprintf(str1,rep1)	sprintf(str1,"%" PRIu64 "-%.5lf-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%" PRIu64 "-%d-%.5lf-%" PRIi32 "-%" PRIu64 "-%" PRIu8 "-%" PRIu8 "-%" PRIu64, \
 									rep1.minLatency,rep1.averageLatency,rep1.maxLatency,rep1.packetCount, \
-									rep1.outOfOrderCount,rep1.errorsCount,(int) (rep1.latencyType),rep1.variance,rep1.lastSeqNumber, \
-									rep1.seqNumberResets,rep1._timeoutOccurred);
+									rep1.outOfOrderCount,rep1.errorsCount,(int) (rep1.latencyType),rep1.variance,rep1.lastMaxSeqNumber, \
+									rep1.seqNumberResets,rep1._timeoutOccurred,\
+									rep1.dupCountEnabled,rep1.dupCount);
 
 // Macro to read from a report stored in a string
-#define repscanf(str1,rep1ptr)		sscanf(str1,"%" SCNu64 "-%lf-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%d-%lf-%" SCNu16 "-%" SCNu64 "-%" SCNu8, \
+#define repscanf(str1,rep1ptr)		sscanf(str1,"%" SCNu64 "-%lf-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%" SCNu64 "-%d-%lf-%" SCNi32 "-%" SCNu64 "-%" SCNu8 "-%" SCNu8 "-%" SCNu64, \
 									rep1ptr.minLatency,rep1ptr.averageLatency,rep1ptr.maxLatency,rep1ptr.packetCount, \
-									rep1ptr.outOfOrderCount,rep1ptr.errorsCount,(int *) (rep1ptr.latencyType),rep1ptr.variance,rep1ptr.lastSeqNumber, \
-									rep1ptr.seqNumberResets,rep1ptr._timeoutOccurred);
+									rep1ptr.outOfOrderCount,rep1ptr.errorsCount,(int *) (rep1ptr.latencyType),rep1ptr.variance,rep1ptr.lastMaxSeqNumber, \
+									rep1ptr.seqNumberResets,rep1ptr._timeoutOccurred,\
+									rep1ptr.dupCountEnabled,rep1ptr.dupCount);
 
-void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode);
+void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode, uint8_t dup_detect_enabled);
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber);
 void reportSetTimeoutOccurred(reportStructure *report);
 void reportStructureFinalize(reportStructure *report);
+void reportStructureFree(reportStructure *report);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
 int printStatsSocket(struct options *opts, reportStructure *report, report_sock_data_t *sock_data,uint16_t test_id);

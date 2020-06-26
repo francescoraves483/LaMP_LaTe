@@ -11,9 +11,9 @@
 // Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
 // If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:X:A:BC:FM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:X:A:BC:DFM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:q:X:A:BC:FM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -95,6 +95,14 @@
 
 // -g TCP socket timeout (in ms)
 #define TCP_g_SOCKET_CONNECT_TIMEOUT 5000
+
+// Initial sequence number for all the LaTe tests
+// Change this only if you really know what you are doing!
+#define INITIAL_SEQ_NO 0
+
+// This constant defines the default size of the carbonDupStoreList data structure, when an optimal size cannot be inferred
+// from the reporting interval (specified with -g) and from the periodicity (specified with -t) (e.g. on a server)
+#define CARBON_REPORT_DEFAULT_FLUSH_STRUCT_SIZE 10
 
 // Char <-> shift mapping for SET_REPORT_EXTRA_DATA_BIT
 // To use SET_REPORT_EXTRA_DATA_BIT() you should specify the report_extra_data variable and one of these macros
@@ -225,6 +233,8 @@ struct options {
 	// -g UDP/TCP socket parameters and type
 	struct sock_params carbon_sock_params;
 	graphite_sock_t carbon_sock_type; // It should be equal to G_TCP if a TCP socket should be used (default), or to G_UDP if a UDP socket should be used
+	
+	uint8_t dup_detect_enabled; // = 1 if duplicate packet detection is enabled, = 0 otherwise
 };
 
 void options_initialize(struct options *options);

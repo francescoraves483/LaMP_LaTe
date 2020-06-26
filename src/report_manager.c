@@ -24,17 +24,14 @@
 
 #define TSTUDTHRS_INCR 0.001
 
-// First number after UINT16_MAX (i.e. 65536 = 2^16, used for sequence number reconstruction after cyclical resets)
-#define UINT16_TOP (UINT16_MAX+1)
-
 // Macros for extra fields printing in writeToTFile() and writeToUDPSocket()
 #define compute_reconstructedSeqNo(perPktData) perPktData->reportDataPointer!=NULL ? \
-			perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+(uint64_t)perPktData->seqNo: \
+			perPktData->reportDataPointer->_lastReconstructedSeqNo : \
 			-1
 
 #define compute_perTillNow(perPktData) perPktData->reportDataPointer!=NULL ? \
-			((double)(perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1-perPktData->reportDataPointer->packetCount)/((perPktData->reportDataPointer->seqNumberResets*UINT16_TOP)+perPktData->reportDataPointer->lastSeqNumber+1) : \
-			-1
+	((double)(perPktData->reportDataPointer->lossCount))/((double)perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+perPktData->reportDataPointer->lastMaxSeqNumber+1-INITIAL_SEQ_NO) : \
+	-1
 
 #define compute_minLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)(perPktData->reportDataPointer->minLatency)/1000 : -1
 
@@ -60,7 +57,7 @@ static inline double computeLostPktPercLastSeqNo(reportStructure *report) {
 
 	// This function works almost as computeLostPktPerc(), but it computes the lost packet percentage up to the last received sequence number
 	if(report->minLatency!=UINT64_MAX) {
-		lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1);
+		lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1);
 	} else {
 		lostPktPercLastSeqNo=100;
 	}
@@ -163,7 +160,7 @@ static inline struct tm *getLocalTime(void) {
 	return localtime(&currtime);
 }
 
-void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode) {
+void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode, uint8_t dup_detect_enabled) {
 	report->averageLatency=0.0;
 	report->minLatency=UINT64_MAX;
 	report->maxLatency=0;
@@ -175,14 +172,14 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 	report->packetCount=0;
 	report->totalPackets=totalPackets;
 	report->errorsCount=0;
+	report->lossCount=0;
 
 	report->variance=0;
 
 	// Internal members
 	report->_isFirstUpdate=1;
 
-	// Initialize also the lastSeqNumber, just to be safe against bugs in the following code, which should set, in any case, lastSeqNumber
-	report->lastSeqNumber=0;
+	report->lastMaxSeqNumber=INITIAL_SEQ_NO-1;
 
 	report->seqNumberResets=0;
 
@@ -190,60 +187,128 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 
 	report->_welfordM2=0;
 
+	report->_lastReconstructedSeqNo=-1;
+
 	for(int i=0;i<CONFINT_NUMBER;i++) {
 		report->confidenceIntervalDev[i]=-1.0;
+	}
+
+	report->dupCount=0;
+	if(dup_detect_enabled) {
+		// Initialize a dupStoreList data structure for detecting sequence numbers
+		// Its size is equal to the minimum number of previously received sequence numbers which should be taken
+		// into account when detecting duplicated packets
+		report->dupCountList=dupSL_init(SEQUENCE_NUMBERS_RESET_THRESHOLD);
+		report->dupCountEnabled=1;
+	} else {
+		report->dupCountEnabled=0;
 	}
 }
 
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber) {
 	uint8_t seqNumberResetOccurred=0;
-	report->packetCount++;
 
-	if(tripTime!=0) {
-		// Set lastSeqNumber on first update
-		if(report->_isFirstUpdate==1) {
-			report->lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
-			report->_isFirstUpdate=0;
+	// Compute the gap between the currently received sequence number and the last maximum sequence number received so far
+	int32_t gap=(int32_t)seqNumber-(int32_t)report->lastMaxSeqNumber;
 
-			seqNumberResetOccurred=1; // Forcing this to '1' as, at the beginning, we should not check for out of order packets
-		} else {
-			// Try to infer if a sequence number reset occurred
-			// This operation is placed here as it is applicable only when this is not the first report update
-			if((int32_t)seqNumber-(int32_t)report->lastSeqNumber<-SEQUENCE_NUMBERS_RESET_THRESHOLD) {
-				report->seqNumberResets++;
-				seqNumberResetOccurred=1;
-			}
-		}
+	// Try to detect a cyclical sequence number reset if there is a big negative gap (i.e. if something like ...->65533->65534->0->2->... happens)
+	if(report->lastMaxSeqNumber!=-1 && gap<-SEQUENCE_NUMBERS_RESET_THRESHOLD) {
+		report->seqNumberResets++;
+		seqNumberResetOccurred=1;
+	}
+	
+	// Reconstruct the current sequence number to obtain its value as if numbers were not cyclical
+	// Example: cyclical = 65535->0->1   -   reconstructed = 65535->65536->65537
+	// If no cyclical sequence number resets occurred so far, just set _lastReconstructedSeqNo to the current sequence number
+	// Take into account also the case in which out of order packets are received after a reset
+	// Example: 65535->0->65534->1 ...  -  we should not sum '65536' to '65534'
+	// The detection of out of order packets after a reset is performed by detecting a large positive gap between the current
+	// packet and the last received (cyclical) maximum sequence number
+	report->_lastReconstructedSeqNo = report->seqNumberResets == 0 ?
+		seqNumber :
+		(report->seqNumberResets-(gap>=SEQUENCE_NUMBERS_RESET_THRESHOLD))*UINT16_TOP+seqNumber;
 
-		report->_welfordAverageLatencyOld=report->averageLatency;
-		report->averageLatency+=(tripTime-report->averageLatency)/report->packetCount;
-
-		if(tripTime<report->minLatency) {
-			report->minLatency=tripTime;
-		}
-
-		if(tripTime>report->maxLatency) {
-			report->maxLatency=tripTime;
-		}
-
-		// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets.
-		// It should not be detected if a normal cyclical reset of sequence numbers has occurred
-		if(seqNumberResetOccurred==0 && seqNumber<=report->lastSeqNumber) {
-			report->outOfOrderCount++;
-		}
-
-		// Set last sequence number
-		report->lastSeqNumber=seqNumber;
-
-		// Compute the current variance (std dev squared) value using Welford's online algorithm
-		report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
-		if(report->packetCount>1) {
-			report->variance=report->_welfordM2/(report->packetCount-1);
-		}
+	// Check for duplicates, saving the current sequence number into a "dupStoreList" (a sort of optimized list for storing
+	// already received sequence numbers). If the sequence number has been never received before, DSL_NOTFOUND is returned by
+	// dupSL_insertandcheck() and the number is stored. If instead it has been received before, dupSL_insertandcheck() will
+	// return DSL_FOUND to signal a duplicated packet
+	if(report->dupCountEnabled && dupSL_insertandcheck(report->dupCountList,report->_lastReconstructedSeqNo)==DSL_FOUND) {
+		report->dupCount++;
 	} else {
-		// If tripTime is zero, a timestamping error occurred: count the current packet as a packet containing an error
-		// This packet will be counter as received, but it will not be used to compute the final statistics
-		report->errorsCount++;
+		report->packetCount++;
+
+		if(tripTime!=0) {
+			report->_welfordAverageLatencyOld=report->averageLatency;
+			report->averageLatency+=(tripTime-report->averageLatency)/report->packetCount;
+
+			if(tripTime<report->minLatency) {
+				report->minLatency=tripTime;
+			}
+
+			if(tripTime>report->maxLatency) {
+				report->maxLatency=tripTime;
+			}
+
+			// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets,
+			// with respect to the maximum sequence number received so far
+			// It should not be detected if a normal cyclical reset of sequence numbers has occurred
+			// A packet is also considered out of order when a very big positive gap is detected, which should provide more
+			// robustness when trying to detect out of order packets just after a cyclical reset occurred
+			// For example in: 65535->0->1->65534->2->3 '65534' should be detected as out of order, even if there is not actually
+			// a decreasing trend between '1' and '65534'
+			if(seqNumberResetOccurred==0 && (seqNumber<=report->lastMaxSeqNumber || gap>=SEQUENCE_NUMBERS_RESET_THRESHOLD)) {
+				report->outOfOrderCount++;
+
+				if(seqNumber!=report->lastMaxSeqNumber && report->lossCount>0) {
+					report->lossCount--;
+				}
+			}
+
+			// Update the packet loss count if a loss occurred (used, for the time being, only for the PER-till-now computation 
+			// when -W is selected)
+			// Manage also the case in which a sequence number reset just occurred (in this case, we must compare the
+			// 'reconstructed' version of seqNumber with the last maximum received number - taking into account that also
+			// lastMaxSeqNumber is cyclically reset, in such a way that it is sufficient to add UINT16_TOP, without taking
+			// into account how many resets occurred so far)
+			// Example: 65535->1 - to detect the loss of '0', we should compare '1+65536 (=65537)' with '65535', not '1'
+			if(((seqNumberResetOccurred==1 && seqNumber+UINT16_TOP>report->lastMaxSeqNumber+1) ||
+				(seqNumberResetOccurred==0 && seqNumber>report->lastMaxSeqNumber+1)) && 
+				gap<SEQUENCE_NUMBERS_RESET_THRESHOLD) {
+
+				report->lossCount+=seqNumber-1-report->lastMaxSeqNumber;
+
+				// Negative loss correction (i.e. if a sequence number reset just occurred, we must consider, as said before,
+				// seqNumber+UINT16_TOP, thus summing UINT16_TOP to the previous report->lossCount computation)
+				if(seqNumberResetOccurred==1) {
+					report->lossCount+=UINT16_TOP;
+				}
+			}
+
+			// Compute the maximum received sequence number so far (as "last sequence number")
+			// When a cyclical number reset is detected, the new maximum so far should be the current sequence number, even if,
+			// strictly speaking, it is smaller than the last maximum
+			// In this way, it is possible to consider a cyclically resetting lastMaxSeqNumber
+			// A new maximum is not detected if gap>=SEQUENCE_NUMBERS_RESET_THRESHOLD (i.e. with a very large positive gap), as the
+			// current packet is considered, in this case, as out of order.
+			if(report->lastMaxSeqNumber!=-1 && (seqNumberResetOccurred==1 || (seqNumber>report->lastMaxSeqNumber && gap<SEQUENCE_NUMBERS_RESET_THRESHOLD))) {
+				report->lastMaxSeqNumber=seqNumber;
+			}
+
+			// Set, at the beginning, the maximum sequence number so far to seqNumber
+			if(report->lastMaxSeqNumber==-1) {
+				report->lastMaxSeqNumber=seqNumber;
+			}
+
+			// Compute the current variance (std dev squared) value using Welford's online algorithm
+			report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
+			if(report->packetCount>1) {
+				report->variance=report->_welfordM2/(report->packetCount-1);
+			}
+		} else {
+			// If tripTime is zero, a timestamping error occurred: count the current packet as a packet containing an error
+			// This packet will be counter as received, but it will not be used to compute the final statistics
+			report->errorsCount++;
+		}
 	}
 }
 
@@ -260,6 +325,12 @@ void reportStructureFinalize(reportStructure *report) {
 	// Compute confidence intervals using Student's T distribution
 	for(int i=0;i<CONFINT_NUMBER;i++) {
 		report->confidenceIntervalDev[i]=tsCalculator(report->packetCount-1,i)*stderr;
+	}
+}
+
+void reportStructureFree(reportStructure *report) {
+	if(report->dupCountEnabled) {
+		dupSL_free(report->dupCountList);
 	}
 }
 
@@ -281,11 +352,6 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 			report->totalPackets,
 			report->errorsCount);
 	} else {
-		if(report->packetCount>report->totalPackets) {
-			fprintf(stream,"There's something wrong: the client received more packets than the total number set with -n.\n");
-			fprintf(stream,"A negative percentage packet loss may occur.\n");
-		}
-
 		// Latency/RTT is computed over all the correctly received packets, excluding all the packets which caused timestamping errors (counted by report->errorsCount)
 		fprintf(stream,"Latency over %" PRIu64 " packets:\n"
 			"(%s)%s Minimum: %.3f ms - Maximum: %.3f ms - Average: %.3f ms\n"
@@ -308,14 +374,13 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 			}
 		}
 
-		// Negative percentages (should never enter here)
+		// Negative percentages (should never enter here if we are detecting duplicates, i.e. if -D is not specified)
 		if(report->packetCount>report->totalPackets) {
 			fprintf(stream,"Lost packets: -%.2f%% [-%" PRIi64 "/%" PRIi64 "]\n",
 				((double)(report->packetCount-report->totalPackets))*100/(report->totalPackets),
 				report->packetCount-report->totalPackets,
 				report->totalPackets);
 		} else {
-			// Positive percentages (should always enter here)
 			fprintf(stream,"Lost packets: %.2f%% [%" PRIi64 "/%" PRIi64 "]\n",
 				((double)(report->totalPackets-report->packetCount))*100/(report->totalPackets),
 				report->totalPackets-report->packetCount,
@@ -331,22 +396,28 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 		fprintf(stream,"Est. number of cyclical sequence number resets: %" PRIu64 "\n",
 			report->seqNumberResets);
 
-		// If a timeout occurred, print that a timeout occurred and print also the packet loss up to that sequence number.
-		// The real last sequence number (as if LaMP sequence numbers were not cyclical) is estimated using report->seqNumberResets, with:
-		// (report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber-report->packetCount+1).
-		if(report->_timeoutOccurred==1) {
-			fprintf(stream,"Timeout occurred: last sequence number: %" PRIu16 " (non-cyclical: %" PRIu64 ")\nEst. packet loss up to last sequence number: %.2f%% [%" PRIi64 "/%" PRIi64 "]\n",
-				report->lastSeqNumber,
-				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,
-				((double)(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1),
-				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber-report->packetCount+1,
-				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber+1);
+		if(report->dupCountEnabled) {
+			fprintf(stream,"Number of duplicated packets: %" PRIu64 "\n",
+				report->dupCount);
 		}
-	}
 
-	if(report->totalPackets>UINT16_MAX) {
-		fprintf(stream,"Note: the number of packets is very large. Since it causes the sequence numbers to cyclically reset,\n"
-			"\t the out of order count may be inaccurate, in the order of +- <number of resets that occurred>.\n");
+		// If a timeout occurred, print that a timeout occurred and print also the packet loss up to that sequence number.
+		// The real last (highest so far) sequence number (as if LaMP sequence numbers were not cyclical) is estimated using report->seqNumberResets, with:
+		// (report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber-report->packetCount+1).
+		if(report->_timeoutOccurred==1) {
+			fprintf(stream,"Timeout occurred: highest sequence number: %" PRIu16 " (non-cyclical: %" PRIu64 ")\nEst. packet loss up to highest sequence number: %.2f%% [%" PRIi64 "/%" PRIi64 "]\n",
+				report->lastMaxSeqNumber,
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,
+				((double)(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1),
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber-report->packetCount+1,
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1);
+		}
+
+		if(!report->dupCountEnabled && report->packetCount>report->totalPackets) {
+			fprintf(stream,"There's something wrong: the client received more packets than the total number set with -n.\n");
+			fprintf(stream,"A negative percentage packet loss may occur.\n");
+			fprintf(stream,"Use -D to enable duplicate packet detection.\n");
+		}
 	}
 }
 
@@ -404,9 +475,9 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 				"StDev-ms,"
 				"SeqNumberResets,"
 				"TimeoutOccurred,"
-				"lastSeqNumber,"
-				"lastSeqNumber-reconstructed-noncyclical,"
-				"LostPacketLastSeq-Perc,"
+				"HighestSeqNumber,"
+				"HighestSeqNumber-reconstructed-noncyclical,"
+				"LostPacketHighestSeq-Perc,"
 				"reportingSuccessful,"
 				"ConfInt90l,"
 				"ConfInt90u,"
@@ -471,8 +542,8 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			sqrt(report->variance)/1000,																							// standard deviation (sqrt of variance)
 			report->seqNumberResets,																								// est. number of sequence number resets
 			report->_timeoutOccurred,																								// timeout occurred (0 = no, 1 = yes)
-			report->lastSeqNumber,																									// last sequence number
-			(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,																// last sequence number (non cyclical, reconstructed)
+			report->lastMaxSeqNumber,																									// last sequence number
+			(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,																// last sequence number (non cyclical, reconstructed)
 			lostPktPercLastSeqNo,																									// lost packets up to last sequence number (perc)																						
 			report->minLatency!=UINT64_MAX);																						// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
 		
@@ -555,7 +626,7 @@ int printStatsSocket(struct options *opts, reportStructure *report, report_sock_
 				"outoforder=%" PRIu64 ","
 				"stdev=%.4f,"
 				"timeout=%d,"
-				"lastseqno=%" PRIu64 ","
+				"highestseqno=%" PRIu64 ","
 				"losttolast=%.2f,"
 				"reportok=%d",
 				test_id,																								// (LaMP ID after "LaTeEND,")
@@ -579,7 +650,7 @@ int printStatsSocket(struct options *opts, reportStructure *report, report_sock_
 				report->outOfOrderCount,																				// outoforder
 				sqrt(report->variance)/1000,																			// stdev
 				report->_timeoutOccurred,																				// timeout
-				(report->seqNumberResets*UINT16_TOP)+report->lastSeqNumber,												// lastseqno (reconstructed, non cyclical)
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,											// highestseqno (reconstructed, non cyclical)
 				computeLostPktPercLastSeqNo(report),																	// losttolast
 				report->minLatency!=UINT64_MAX																			// reportok
 				);
@@ -799,7 +870,6 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 	// -X 'a' will set all the bits in "enabled_extra_data", thus making the program enter in all the if statements below
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
 		perTillNow=compute_perTillNow(perPktData);
-
 		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f",perTillNow);
 	}
 
