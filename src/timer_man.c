@@ -46,6 +46,22 @@ int timerCreateAndSet(struct pollfd *timerMon,int *clockFd,uint64_t time_ms) {
 	return 0;
 }
 
+int timerStop(int *clockFd) {
+	struct itimerspec new_value;
+
+	new_value.it_value.tv_sec=0;
+	new_value.it_value.tv_nsec=0;
+	new_value.it_interval.tv_nsec=0;
+	new_value.it_interval.tv_sec=0;
+
+	// Stop (disarm) timer
+	if(timerfd_settime(*clockFd,NO_FLAGS_TIMER,&new_value,NULL)==-1) {
+		return -2;
+	}
+
+	return 0;
+}
+
 int timerRearmDouble(int clockFd,double time_ms_double) {
 	struct itimerspec new_value;
 	double time_ms_double_floor=floor(time_ms_double);

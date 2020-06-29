@@ -11,9 +11,9 @@
 // Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
 // If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:X:A:BC:DFM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:i:X:A:BC:DFM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:i:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -235,6 +235,8 @@ struct options {
 	graphite_sock_t carbon_sock_type; // It should be equal to G_TCP if a TCP socket should be used (default), or to G_UDP if a UDP socket should be used
 	
 	uint8_t dup_detect_enabled; // = 1 if duplicate packet detection is enabled, = 0 otherwise
+
+	uint32_t duration_interval; // Specified through -i (if specified, i.e. if !=0, -n is ignored)
 };
 
 void options_initialize(struct options *options);

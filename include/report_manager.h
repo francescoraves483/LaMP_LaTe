@@ -48,6 +48,7 @@ void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t 
 void reportSetTimeoutOccurred(reportStructure *report);
 void reportStructureFinalize(reportStructure *report);
 void reportStructureFree(reportStructure *report);
+void reportStructureChangeTotalPackets(reportStructure *report, uint64_t totalPackets);
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
 int printStatsSocket(struct options *opts, reportStructure *report, report_sock_data_t *sock_data,uint16_t test_id);

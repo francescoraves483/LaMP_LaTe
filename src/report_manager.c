@@ -334,6 +334,10 @@ void reportStructureFree(reportStructure *report) {
 	}
 }
 
+void reportStructureChangeTotalPackets(reportStructure *report, uint64_t totalPackets) {
+	report->totalPackets=totalPackets;
+}
+
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask) {
 	int i;
 	const char *confidenceIntervalLabels[]={".90",".95",".99"};
@@ -460,6 +464,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 				"UP,"
 				"PayloadLen-B,"
 				"TotReqPackets,"
+				"TestDuration-s,"
 				"Interval-ms,"
 				"Interval-type,"
 				"Interval-Distrib-Param,"
@@ -505,6 +510,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 		dprintf(csvfp,"%d," 		// macUP
 			"%" PRIu16 ","			// payloadLen
 			"%" PRIu64 ","			// total number of packets requested
+			"%" PRIu32 ","			// total test duration (-i, in s)
 			"%.3f,"					// interval between packets (in ms)
 			"%s,"					// (random) interval type
 			"%lf,"					// random interval param (if available, if not, it is equal to -1)
@@ -526,11 +532,12 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%d,",					// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
-			opts->number,																											// total number of packets requested
+			opts->duration_interval == 0 ? opts->number : 0,																		// total number of packets requested
+			opts->duration_interval,																								// total test duration (-i, in s)
 			(double) opts->interval,																								// interval between packets (in ms)
 			opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),						// (random) interval type
 			opts->rand_param,																										// random interval param (if available, if not, it is equal to -1)
-			opts->rand_batch_size,																									// random interval batch size (if available, if not using random intervals, it is forced to be always = total number of packets)
+			opts->rand_type==NON_RAND ? report->totalPackets : opts->rand_batch_size,																							// random interval batch size (if available, if not using random intervals, it is forced to be always = total number of packets)
 			latencyTypePrinter(report->latencyType),																				// latency type (-L)
 			report->followupMode!=FOLLOWUP_OFF ? "On" : "Off",																		// follow-up (-F)					
 			report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,												// minLatency
@@ -542,8 +549,8 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			sqrt(report->variance)/1000,																							// standard deviation (sqrt of variance)
 			report->seqNumberResets,																								// est. number of sequence number resets
 			report->_timeoutOccurred,																								// timeout occurred (0 = no, 1 = yes)
-			report->lastMaxSeqNumber,																									// last sequence number
-			(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,																// last sequence number (non cyclical, reconstructed)
+			report->lastMaxSeqNumber,																								// last sequence number
+			(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,															// last sequence number (non cyclical, reconstructed)
 			lostPktPercLastSeqNo,																									// lost packets up to last sequence number (perc)																						
 			report->minLatency!=UINT64_MAX);																						// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
 		
@@ -612,6 +619,7 @@ int printStatsSocket(struct options *opts, reportStructure *report, report_sock_
 				"UP=%d,"
 				"payloadlen=%" PRIu16 ","
 				"totpackets=%" PRIu64 ","
+				"testduration_s=%" PRIu32 ","
 				"interval_ms=%.3f,"
 				"interval_type=%s,"
 				"int_distr_param=%lf,"
@@ -635,11 +643,12 @@ int printStatsSocket(struct options *opts, reportStructure *report, report_sock_
 				opts->mode_ub==UNIDIR ? "unidirectional" : "pinglike",													// clientmode
 				opts->macUP==UINT8_MAX ? 0 : opts->macUP,																// UP
 				opts->payloadlen,																						// payloadlen
-				opts->number,																							// totpackets
+				opts->duration_interval == 0 ? opts->number : 0,														// totpackets
+				opts->duration_interval,																				// testduration_s
 				(double) opts->interval,																				// interval_ms
 				opts->rand_type==NON_RAND ? "fixed_periodic" : enum_to_str_rand_distribution_t(opts->rand_type),		// interval_type
 				opts->rand_param,																						// int_distr_param
-				opts->rand_batch_size,																					// int_distr_batch
+				opts->rand_type==NON_RAND ? report->totalPackets : opts->rand_batch_size,								// int_distr_batch
 				latencyTypePrinter(report->latencyType),																// latencytype
 				report->followupMode,																					// followup (full follow-up mode enum value, =0 if off, >0 if on)
 				report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,								// min_ms

@@ -20,6 +20,7 @@
 #define MICROSEC_TO_MILLISEC 1000
 
 int timerCreateAndSet(struct pollfd *timerMon, int *clockFd, uint64_t time_ms);
+int timerStop(int *clockFd);
 int timerRearmDouble(int clockFd,double time_ms_double);
 int timerRearmRandom(int clockFd,struct options *opts);
 char * timerRandDistribCheckConsistency(uint64_t basic_interval,double param,rand_distribution_t rand_type);

@@ -14,6 +14,9 @@ void thread_error_print(const char *name, t_error_types err) {
 		case ERR_SETTIMER:
 			fprintf(stderr,"%s reported an error in timerfd_settime().\n",name);
 			break;
+		case ERR_STOPTIMER:
+			fprintf(stderr,"%s reported an error when trying to stop the periodic interval timer.\n",name);
+			break;
 		case ERR_RANDSETTIMER:
 			fprintf(stderr,"%s reported an error when trying to set again the timer to a random value.\n",name);
 			break;

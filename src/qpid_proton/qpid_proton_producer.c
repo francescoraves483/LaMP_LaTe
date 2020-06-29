@@ -90,7 +90,7 @@ static int amqpControlSender(lamptype_t type,pn_link_t *lnk,struct amqp_data *aD
 	return 1;
 }
 
-static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned int *counter,byte_t *payload_buff,pn_link_t *lnk,struct amqp_data *aData,struct options *opts) {
+static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned int *counter,uint8_t *sendLast,byte_t *payload_buff,pn_link_t *lnk,struct amqp_data *aData,struct options *opts) {
 	pn_data_t* message_body;
 	char deliverytag_unidir_seq[DELIVERYTAG_UNIDIR_SEQ_SIZE];
 
@@ -100,7 +100,7 @@ static int amqpUNIDIRSenderSingleIter(struct lamphdr *commonLampHeader,unsigned 
 	}
 
 	// Set UNIDIR_STOP type if this is the last packet
-	if(*counter==opts->number-1) {
+	if(*counter==opts->number-1 || *sendLast==1) {
 		lampSetUnidirStop(commonLampHeader);
 		producerStatus=P_REPORTWAIT;
 	}
@@ -220,10 +220,14 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 	static byte_t *payload_buff=NULL;
 
 	// Timer and poll() variables
-	struct pollfd timerMon;
 	int clockFd;
 	int timerCaS_res=0;
 	int poll_retval=1;
+	struct pollfd timerMon[2];
+	static int pollfd_size=1;
+
+	int durationClockFd;
+	static uint8_t sendLast=0;
 
 	// Junk variable (needed to clear the timer event with read()) - maybe a better solution avoiding this exists...
 	unsigned long long junk;
@@ -311,17 +315,27 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 					}
 
 					// Wait for timer expiration
-					poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
+					poll_retval=poll(timerMon,pollfd_size,INDEFINITE_BLOCK);
 					if(poll_retval>0) {
+						if(opts->duration_interval!=0 && timerMon[1].revents>0) {
+							if(read(durationClockFd,&junk,sizeof(junk))==-1) {
+								fprintf(stderr,"Error: unable to read an event from the test duration timer.\nIt is not safe to continue the current test from packet: %d.\n",counter);
+								return -4;
+							}
+	
+							timerStop(&durationClockFd);
+							sendLast=1;
+						}
+
 						// "Clear the event" by performing a read() on a junk variable
-						if(read(clockFd,&junk,sizeof(junk))==-1) {
+						if(timerMon[0].revents>0 && read(clockFd,&junk,sizeof(junk))==-1) {
 							fprintf(stderr,"Error: unable to read a timer event before sending a packet.\nIt is not safe to continue the current test from packet: %d.\n",counter);
 							return -4;
 						}
 					}
 
 					// Rearm timer with a random timeout if '-R' was specified
-					if(opts->rand_type!=NON_RAND && batch_counter==opts->rand_batch_size) {
+					if(sendLast!=1 && opts->rand_type!=NON_RAND && batch_counter==opts->rand_batch_size) {
 						if(timerRearmRandom(clockFd,opts)<0) {
 							fprintf(stderr,"Error: unable to set random interval with distribution %s\n",enum_to_str_rand_distribution_t(opts->rand_type));
 							return -3;
@@ -331,7 +345,7 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 
 					// Continue sending packets. The producerStatus is automatically updated to P_REPORTWAIT when
 					// the last LaMP packet is sent.
-					if(amqpUNIDIRSenderSingleIter(&commonLampHeader,&counter,payload_buff,l_tx,aData,opts)==-1) {
+					if(amqpUNIDIRSenderSingleIter(&commonLampHeader,&counter,&sendLast,payload_buff,l_tx,aData,opts)==-1) {
 						fprintf(stderr,"Error: unable to send packet with sequence number %d\n",counter);
 						return -1;
 					}
@@ -385,7 +399,7 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 						};
 
 						// Create and start timer
-						timerCaS_res=timerCreateAndSet(&timerMon,&clockFd,opts->interval);
+						timerCaS_res=timerCreateAndSet(&timerMon[0], &clockFd, opts->interval);
 
 						if(timerCaS_res==-1) {
 							return -1;
@@ -393,15 +407,35 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 							return -1;
 						}
 
+						// Create and start test duration timer (if required only - i.e. if the user specified -i)
+						if(opts->duration_interval>0) {
+							pollfd_size=2;
+					
+							timerCaS_res=timerCreateAndSet(&timerMon[1],&durationClockFd,opts->duration_interval*1000);
+					
+							if(timerCaS_res==-1) {
+								return -1;
+							} else if(timerCaS_res==-2) {
+								return -1;
+							}
+						} else {
+							pollfd_size=1;
+						}
+
 						// Ready to send packets: update status
 						producerStatus=P_SENDING;
 
 						// Start sending the first test packet
-						if(amqpUNIDIRSenderSingleIter(&commonLampHeader,&counter,payload_buff,l_tx,aData,opts)==-1) {
+						if(amqpUNIDIRSenderSingleIter(&commonLampHeader,&counter,&sendLast,payload_buff,l_tx,aData,opts)==-1) {
 							fprintf(stderr,"Error: unable to send packet with sequence number %d\n",counter);
 							return -1;
 						}
 					} else if(producerStatus==P_REPORTWAIT) {
+						// Before waiting for the report, as the last packet should have been sent when the status is P_REPORTWAIT,
+						// set set the report's total packets value to the amount of packets sent during this test, if -i is used
+						if(opts->duration_interval!=0) {
+							reportStructureChangeTotalPackets(reportPtr,counter);
+						}
 						if(opts->verboseFlag) {
 							fprintf(stdout,"[INFO] Producer is handling a readable PN_DELIVERY on link=%s, with producer status=P_REPORTWAIT\n",pn_link_name(lnk));
 						}
@@ -471,21 +505,34 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts, repor
 	// Inform the user about the current options
 	fprintf(stdout,"Qpid Proton AMQP client started, with options:\n\t[node] = producer (LaMP client role)\n"
 		"\t[interval] = %" PRIu64 " ms\n"
-		"\t[reception timeout] = %" PRIu32 " ms\n"
-		"\t[total number of packets] = %" PRIu64 "\n"
-		"\t[mode] = %s\n"
+		"\t[reception timeout] = %" PRIu32 " ms\n",
+		opts->interval, aData.proactor_timeout);
+
+	if(opts->duration_interval!=0) {
+		fprintf(stdout,"\t[test duration] = %" PRIu32 " s\n",
+			opts->duration_interval);
+	} else {
+		fprintf(stdout,"\t[total number of packets] = %" PRIu64 "\n",
+			opts->number);
+	}
+
+	fprintf(stdout,"\t[mode] = %s\n"
 		"\t[payload length] = %" PRIu16 " B \n"
 		"\t[broker address] = %s\n"
 		"\t[latency type] = %s\n"
 		"\t[follow-up] = not supported\n"
-		"\t[random interval] = %s\n"
-		"\t[random interval batch] = %" PRIu64 "\n",
-		opts->interval, aData.proactor_timeout,
-		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
+		"\t[random interval] = %s\n",
+		opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
 		opts->payloadlen, opts->dest_addr_u.destAddrStr,
 		latencyTypePrinter(opts->latencyType),
-		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),
-		opts->rand_batch_size);
+		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type));
+
+	if(opts->rand_type==NON_RAND) {
+		fprintf(stdout,"\t[random interval batch] = -\n");
+	} else {
+		fprintf(stdout,"\t[random interval batch] = %" PRIu64 "\n",
+			opts->rand_batch_size);
+	}
 
 	// LaMP ID is randomly generated between 0 and 65535 (the maximum over 16 bits)
 	lamp_id_session=(rand()+getpid())%UINT16_MAX;
@@ -500,6 +547,10 @@ unsigned int runAMQPproducer(struct amqp_data aData, struct options *opts, repor
 	snprintf(aData.containerID,CONTAINERID_LEN,"LaTe_prod_%05" PRIu16,lamp_id_session);
 	snprintf(aData.senderName,SENDERNAME_LEN,"LaTe_prod_tx_%05" PRIu16,lamp_id_session);
 	snprintf(aData.receiverName,RECEIVERNAME_LEN,"LaTe_prod_rx_%05" PRIu16,lamp_id_session);
+
+	if(opts->duration_interval>0) {
+		opts->number=UINT64_MAX;
+	}
 
 	// Start waiting for events
 	do {

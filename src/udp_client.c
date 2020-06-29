@@ -200,9 +200,14 @@ static void txLoop (arg_struct_udp *args) {
 	byte_t *lampPacketRxPtr=NULL;
 
 	// Timer variables
-	struct pollfd timerMon;
+	struct pollfd timerMon[2];
+	int pollfd_size;
 	int clockFd;
 	int timerCaS_res=0;
+
+	// Test duration specific timer variables
+	int durationClockFd;
+	int sendLast=0;
 
 	// Junk variable (needed to clear the timer event with read())
 	unsigned long long junk;
@@ -328,7 +333,7 @@ static void txLoop (arg_struct_udp *args) {
 	}
 
 	// Create and start timer
-	timerCaS_res=timerCreateAndSet(&timerMon, &clockFd, args->opts->interval);
+	timerCaS_res=timerCreateAndSet(&timerMon[0], &clockFd, args->opts->interval);
 
 	if(timerCaS_res==-1) {
 		t_tx_error=ERR_TIMERCREATE;
@@ -338,8 +343,31 @@ static void txLoop (arg_struct_udp *args) {
 		pthread_exit(NULL);
 	}
 
-	// Run until 'number' is reached
-	while(counter<args->opts->number) {
+	// Create and start test duration timer (if required only - i.e. if the user specified -i)
+	if(args->opts->duration_interval>0) {
+		pollfd_size=2; // poll() will monitor two descriptors
+
+		timerCaS_res=timerCreateAndSet(&timerMon[1],&durationClockFd,args->opts->duration_interval*1000);
+
+		if(timerCaS_res==-1) {
+			t_tx_error=ERR_TIMERCREATE;
+			close(clockFd);
+			pthread_exit(NULL);
+		} else if(timerCaS_res==-2) {
+			t_tx_error=ERR_SETTIMER;
+			close(clockFd);
+			pthread_exit(NULL);
+		}
+	} else {
+		pollfd_size=1; // poll() will monitor one descriptor only (clockFd)
+	}
+
+	if(args->opts->duration_interval>0) {
+		args->opts->number=UINT64_MAX;
+	}
+
+	// Run until 'number' is reached or until the time specified with -i elapses
+	while(counter<args->opts->number && sendLast==0) {
 		// Stop the loop if the rx loop has reported a timeout
 		#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
 			if(rx_loop_timeout_error==1) {
@@ -354,15 +382,26 @@ static void txLoop (arg_struct_udp *args) {
 		#endif
 
 		// poll waiting for events happening on the timer descriptor (i.e. wait for timer expiration)
-		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
+		if(poll(timerMon,pollfd_size,INDEFINITE_BLOCK)>0) {
+			// If the duration timer expired, send now the last packet and set sendLast to 1 to terminate the current test
+			if(args->opts->duration_interval!=0 && timerMon[1].revents>0) {
+				if(read(durationClockFd,&junk,sizeof(junk))==-1) {
+					t_tx_error=ERR_CLEAR_TIMER_EVENT;
+					break;
+				}
+
+				timerStop(&durationClockFd);
+				sendLast=1;
+			}
+
 			// "Clear the event" by performing a read() on a junk variable
-			if(read(clockFd,&junk,sizeof(junk))==-1) {
+			if(timerMon[0].revents>0 && read(clockFd,&junk,sizeof(junk))==-1) {
 				t_tx_error=ERR_CLEAR_TIMER_EVENT;
 				break;
 			}
 
 			// Rearm timer with a random timeout if '-R' was specified
-			if(args->opts->rand_type!=NON_RAND && batch_counter==args->opts->rand_batch_size) {
+			if(sendLast!=1 && args->opts->rand_type!=NON_RAND && batch_counter==args->opts->rand_batch_size) {
 				if(timerRearmRandom(clockFd,args->opts)<0) {
 					t_tx_error=ERR_RANDSETTIMER;
 					pthread_exit(NULL);
@@ -371,7 +410,7 @@ static void txLoop (arg_struct_udp *args) {
 			}
 
 			// Set UNIDIR_STOP or PINGLIKE_ENDREQ (TLESS for HARDWARE mode) when the last packet has to be transmitted, depending on the current mode_ub ("mode unidirectional/bidirectional")
-			if(counter==args->opts->number-1) {
+			if(counter==args->opts->number-1 || sendLast==1) {
 				if(args->opts->mode_ub==UNIDIR) {
 					lampSetUnidirStop(&lampHeader);
 				} else if(args->opts->mode_ub==PINGLIKE) {
@@ -444,6 +483,11 @@ static void txLoop (arg_struct_udp *args) {
 			counter++;
 			if(args->opts->rand_type!=NON_RAND) batch_counter++;
 		}
+	}
+
+	// Set the report's total packets value to the amount of packets sent during this test, if -i was used
+	if(args->opts->duration_interval!=0) {
+		reportStructureChangeTotalPackets(&reportData,counter);
 	}
 
 	// Free payload buffer
@@ -864,22 +908,36 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 	// Inform the user about the current options
 	fprintf(stdout,"UDP client started, with options:\n\t[socket type] = UDP\n"
 		"\t[interval] = %" PRIu64 " ms\n"
-		"\t[reception timeout] = %" PRIu64 " ms\n"
-		"\t[total number of packets] = %" PRIu64 "\n"
-		"\t[mode] = %s\n"
+		"\t[reception timeout] = %" PRIu64 " ms\n",
+		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+opts->client_timeout : opts->interval+opts->client_timeout);
+
+	if(opts->duration_interval!=0) {
+		fprintf(stdout,"\t[test duration] = %" PRIu32 " s\n",
+			opts->duration_interval);
+	} else {
+		fprintf(stdout,"\t[total number of packets] = %" PRIu64 "\n",
+			opts->number);
+	}
+
+	fprintf(stdout,"\t[mode] = %s\n"
 		"\t[payload length] = %" PRIu16 " B \n"
 		"\t[destination IP address] = %s\n"
 		"\t[latency type] = %s\n"
 		"\t[follow-up] = %s\n"
-		"\t[random interval] = %s\n"
-		"\t[random interval batch] = %" PRIu64 "\n",
-		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+opts->client_timeout : opts->interval+opts->client_timeout,
-		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
+		"\t[random interval] = %s\n",
+		opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
 		opts->payloadlen, inet_ntoa(opts->dest_addr_u.destIPaddr),
 		latencyTypePrinter(opts->latencyType),
 		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On",
-		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),
-		opts->rand_batch_size);
+		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type)
+		);
+
+	if(opts->rand_type==NON_RAND) {
+		fprintf(stdout,"\t[random interval batch] = -\n");
+	} else {
+		fprintf(stdout,"\t[random interval batch] = %" PRIu64 "\n",
+			opts->rand_batch_size);
+	}
 
 	// Print current UP
 	if(opts->macUP==UINT8_MAX) {

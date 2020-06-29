@@ -6,6 +6,7 @@
 #include <getopt.h>
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <inttypes.h>
@@ -33,6 +34,14 @@
 	"\t  one from consumer-to-producer communication (.rx will be appended.\n"
 #define OPT_n_client \
 	"  -n <total number of packets to be sent>: specifies how many packets to send (default: "STRINGIFY(CLIENT_DEF_NUMBER)").\n"
+#define OPT_i_client \
+	"  -i <test duration in seconds>: specifies how much the test should last, in seconds. If specified together with\n" \
+	"\t  -n, and no periodicity is specified (with -t), the values of -i and -n will be used to automatically infer\n" \
+	"\t  the periodicity, for the purpose of having a test lasting <test duration in seconds>, with <total number of\n" \
+	"\t  packets to be sent> packets. It is not possible to specify, at the same time, -i, -n and -t and it is not\n" \
+	"\t  possible to automatically compute the -t value when -R, for random periodicities, is specified.\n" \
+	"\t  In any case, no more than "STRINGIFY(UINT64_MAX)" packets can be sent and the test is terminated if the\n" \
+	"\t  duration is too long, in such a way that more than "STRINGIFY(UINT64_MAX)" packets would be sent.\n"
 #define OPT_t_client \
 	"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: "STRINGIFY(CLIENT_DEF_INTERVAL)" ms).\n"
 #define OPT_R_client \
@@ -360,6 +369,7 @@ static void print_long_info(void) {
 
 		"[options] - Optional client options:\n"
 			// General options
+			OPT_i_client
 			OPT_n_client
 			OPT_p_both
 			OPT_r_both
@@ -504,6 +514,7 @@ void options_initialize(struct options *options) {
 	options->interval=0;
 	options->client_timeout=CLIENT_DEF_TIMEOUT;
 	options->number=CLIENT_DEF_NUMBER;
+	options->duration_interval=0;
 	options->payloadlen=0;
 
 	// Initial UP is set to 'UINT8_MAX', as it should not be a valid value
@@ -591,6 +602,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t F_flag=0; // = 1 if -F was specified, otherwise = 0
 	uint8_t T_flag=0; // = 1 if -T was specified, otherwise = 0
 	uint8_t N_flag=0; // = 1 if -N was specified, otherwise = 0
+	uint8_t n_flag=0; // = 1 if -n was specified, otherwise = 0
 
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
@@ -657,6 +669,21 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					fprintf(stderr,"Error in parsing the number of packets.\n\t Please note that '0' is not accepted as value for -n).\n");
 					print_short_info_err(options);
 				}
+
+				n_flag=1;
+				break;
+
+			case 'i':
+				if(sscanf(optarg,"%" SCNu32, &options->duration_interval)<1) {
+					fprintf(stderr,"Error: cannot parse the test duration specified after -i.\n");
+					print_short_info_err(options);
+				}
+
+				if(options->duration_interval==0) {
+					fprintf(stderr,"Error in parsing the test duration.\n\t Please note that '0' is not accepted as a valid value for -i).\n");
+					print_short_info_err(options);
+				}
+
 				break;
 
 			case 'c':
@@ -1262,6 +1289,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: -R is a client-only option.\n");
 			print_short_info_err(options);
 		}
+		if(options->duration_interval!=0) {
+			fprintf(stderr,"Error: -i is a client-only option.\n");
+			print_short_info_err(options);
+		}
+		if(n_flag!=0) {
+			fprintf(stderr,"Error: -n is a client-only option.\n");
+			print_short_info_err(options);
+		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
 			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
@@ -1301,6 +1336,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(options->rand_type!=NON_RAND) {
 			fprintf(stderr,"Error: -R is a client-only option.\n");
+			print_short_info_err(options);
+		}
+		if(options->duration_interval!=0) {
+			fprintf(stderr,"Error: -i is a client-only option.\n");
+			print_short_info_err(options);
+		}
+		if(n_flag!=0) {
+			fprintf(stderr,"Error: -n is a client-only option.\n");
 			print_short_info_err(options);
 		}
 	}
@@ -1367,11 +1410,31 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	}
 	#endif
 
-	// If rand type is NON_RAND, set the batch size equal to the number specified with -n
-	// This is done only for saving this value in the CSV file/print it when a client starts when no random distribution is selected
-	// It should have no other practical implications as NON_RAND ignores any random periodicity batch size
-	if(options->rand_type==NON_RAND) {
-		options->rand_batch_size=options->number;
+	// Manage the case in which both -n and -i are specified (if no -t is specified, it will be automatically inferred from -n/-i)
+	if(n_flag==1 && options->interval!=0 && options->duration_interval!=0) {
+		fprintf(stderr,"Error: you cannot specify -n and -i together when -t is set.\n");
+		print_short_info_err(options);
+	} else if(n_flag==1 && options->duration_interval!=0) {
+		if(options->rand_type==NON_RAND) {
+			options->interval=(uint64_t) round(options->duration_interval*1000.0/options->number);
+		
+			// In this case, -n will take priority over -i when the client is not fast enough to complete the transmission
+			// of all the -n packets in -i seconds, as if -i was not specified (but only used to compute -t), i.e. the client
+			// will always transmits -n packets
+			options->duration_interval=0;
+
+			if(options->interval==0) {
+				fprintf(stderr,"Error. The specified -n and -i values lead to a value of periodicity < 1 ms.\n"
+					"Please either increase the -i value or decrease the number of packets.\n");
+				print_short_info_err(options);
+			}
+
+			fprintf(stdout,"Automatically set packet periodicity to: %" PRIu64 " ms.\n",options->interval);
+		} else {
+			fprintf(stderr,"Error: you cannot automatically compute the -t value when -R is selected.\n"
+				"Please specify an explicit value for -t and remove either -n or -i.\n");
+			print_short_info_err(options);
+		}
 	}
 
 	if(options->interval==0) {
@@ -1382,6 +1445,12 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			// Set the default timeout value if no explicit value was defined
 			options->interval=SERVER_DEF_TIMEOUT;
 		}
+	}
+
+	if(options->duration_interval!=0 && options->duration_interval*1000<options->interval) {
+		fprintf(stderr,"Error: the specified value of -i should always be greater (or equal) than the base periodic interval (-t option).\n");
+		fprintf(stderr,"Remember that -i is specified in seconds, while -t in milliseconds.\n");
+		print_short_info_err(options);
 	}
 
 	// Check the consistency of the parameters specified after -R, if -R was specified (i.e. if options->rand_type!=NON_RAND)

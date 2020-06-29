@@ -39,7 +39,7 @@ static void *flush_loop (void *arg) {
 	// Get the current time and set the initial expiration of the timer in such a way that it will expire
 	// a little after an exact second, in CLOCK_REALTIME
 	clock_gettime(CLOCK_REALTIME,&now);
-	new_value.it_value.tv_nsec=now.tv_nsec==0 ? 0 : 1000000000-now.tv_nsec;
+	new_value.it_value.tv_nsec=now.tv_nsec==0 ? 1 : 1000000000-now.tv_nsec;
 	new_value.it_value.tv_sec=0;
 
 	// Start timer
