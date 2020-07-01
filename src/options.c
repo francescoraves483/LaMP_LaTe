@@ -134,9 +134,11 @@
 	"\t  additional information when each test is performed. Not all modes/protocol will print more information\n" \
 	"\t  when this mode is activated.\n"
 #define OPT_w_both \
-	"  -w <IPv4:port>: output per-packet and report data, just like -W and -f for a CSV file, to a socket, which can then be\n" \
-	"\t  read by any other application for further processing. To improve usability, the data is sent towards the selected IPv4\n" \
-	"\t  and port in a textual, CSV-like human-readable format.\n" \
+	"  -w <IPv4:port>: output per-packet and report data, just like -W and -f for a CSV file, to a socket, sending packets which\n" \
+	"\t  can then be read by any other application for further processing. To improve usability, the data is sent towards the\n" \
+	"\t  selected IPv4 and port in a textual, CSV-like, human-readable format.\n" \
+	"\t  The specified IP address should be the one of the device in which the application receiving the information coming\n" \
+	"\t  from LaTe is run.\n" \
 	"\t  When no port is specified, "STRINGIFY(DEFAULT_W_SOCKET_PORT)" will be used.\n" \
 	"\t  After <IPv4:port>, it is possibile to specify an interface, through its name, to bind the socket to, for instance:\n" \
 	"\t  '-w 192.168.1.101:46001,enp2s0'; if no interface is specified, the socket will be bound to all interfaces.\n" \
