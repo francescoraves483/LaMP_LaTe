@@ -408,9 +408,13 @@ static int producerEventHandler(struct amqp_data *aData,struct options *opts,rep
 						}
 
 						// Create and start test duration timer (if required only - i.e. if the user specified -i)
-						if(opts->duration_interval>0) {
+						if(opts->duration_interval>0 || opts->seconds_to_end!=-1) {
 							pollfd_size=2;
-					
+							
+							if(opts->seconds_to_end!=-1) {
+								setTestDurationEndTime(opts);
+							}			
+
 							timerCaS_res=timerCreateAndSet(&timerMon[1],&durationClockFd,opts->duration_interval*1000);
 					
 							if(timerCaS_res==-1) {

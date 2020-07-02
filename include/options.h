@@ -11,9 +11,9 @@
 // Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
 // If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:i:X:A:BC:DFM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:i:z:X:A:BC:DFM:NP:R:S:UVL:I:W:T:01"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:i:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:i:z:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:01"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -237,6 +237,9 @@ struct options {
 	uint8_t dup_detect_enabled; // = 1 if duplicate packet detection is enabled, = 0 otherwise
 
 	uint32_t duration_interval; // Specified through -i (if specified, i.e. if !=0, -n is ignored)
+
+	// Specified through -z (-z will automatically create a -i value, just before starting the timer, in order to finish at the specified time)
+	int32_t seconds_to_end;
 };
 
 void options_initialize(struct options *options);
@@ -244,5 +247,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options);
 void options_free(struct options *options);
 void options_set_destIPaddr(struct options *options, struct in_addr destIPaddr);
 const char * latencyTypePrinter(latencytypes_t latencyType);
+void setTestDurationEndTime(struct options *options);
 
 #endif

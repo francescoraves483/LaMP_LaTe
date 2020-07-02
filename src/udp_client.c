@@ -344,8 +344,12 @@ static void txLoop (arg_struct_udp *args) {
 	}
 
 	// Create and start test duration timer (if required only - i.e. if the user specified -i)
-	if(args->opts->duration_interval>0) {
+	if(args->opts->duration_interval>0 || args->opts->seconds_to_end!=-1) {
 		pollfd_size=2; // poll() will monitor two descriptors
+
+		if(args->opts->seconds_to_end!=-1) {
+			setTestDurationEndTime(args->opts);
+		}
 
 		timerCaS_res=timerCreateAndSet(&timerMon[1],&durationClockFd,args->opts->duration_interval*1000);
 

@@ -41,7 +41,12 @@
 	"\t  packets to be sent> packets. It is not possible to specify, at the same time, -i, -n and -t and it is not\n" \
 	"\t  possible to automatically compute the -t value when -R, for random periodicities, is specified.\n" \
 	"\t  In any case, no more than "STRINGIFY(UINT64_MAX)" packets can be sent and the test is terminated if the\n" \
-	"\t  duration is too long, in such a way that more than "STRINGIFY(UINT64_MAX)" packets would be sent.\n"
+	"\t  duration is too long, when more than "STRINGIFY(UINT64_MAX)" packets would be sent.\n"
+#define OPT_z_client \
+	"  -z <hour:minute:second at which the test should end>: specifies how much the test should last, by\n" \
+	"\t  making it last until the given hour, minute and second. For example, with -z 15:15:00, the test will\n" \
+	"\t  last until the local time is a quarter past 3 PM. The hours should be specified with a 24-hour format.\n" \
+	"\t  This option cannot be specified together with -i and/or -n (a periodicity value shall always be specified).\n"
 #define OPT_t_client \
 	"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: "STRINGIFY(CLIENT_DEF_INTERVAL)" ms).\n"
 #define OPT_R_client \
@@ -376,6 +381,7 @@ static void print_long_info(void) {
 			OPT_p_both
 			OPT_r_both
 			OPT_t_client
+			OPT_z_client
 			OPT_A_both
 			OPT_C_client
 			OPT_D_both
@@ -590,6 +596,8 @@ void options_initialize(struct options *options) {
 	options->carbon_sock_type=G_TCP;
 
 	options->dup_detect_enabled=1;
+
+	options->seconds_to_end=-1;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -684,6 +692,37 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				if(options->duration_interval==0) {
 					fprintf(stderr,"Error in parsing the test duration.\n\t Please note that '0' is not accepted as a valid value for -i).\n");
 					print_short_info_err(options);
+				}
+
+				break;
+
+			case 'z':
+				{
+
+				unsigned int hh,mm,ss;
+
+				if(sscanf(optarg,"%d:%d:%d",&hh,&mm,&ss)<3) {
+					fprintf(stderr,"Error: cannot parse the hours:minutes:seconds string after -z.\n");
+					print_short_info_err(options);
+				}
+
+				if(hh>23) {
+					fprintf(stderr,"Error when parsing the test end time. Invalid hours value. Hours should be between 00 and 23\n");
+					print_short_info_err(options);
+				}
+
+				if(mm>59) {
+					fprintf(stderr,"Error when parsing the test end time. Invalid minutes value. Minutes should be between 00 and 59\n");
+					print_short_info_err(options);
+				}
+
+				if(ss>59) {
+					fprintf(stderr,"Error when parsing the test end time. Invalid seconds value. Seconds should be between 00 and 59\n");
+					print_short_info_err(options);
+				}
+
+				options->seconds_to_end=hh*3600+mm*60+ss;
+
 				}
 
 				break;
@@ -1299,6 +1338,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: -n is a client-only option.\n");
 			print_short_info_err(options);
 		}
+		if(options->seconds_to_end!=-1) {
+			fprintf(stderr,"Error: -z is a client-only option.\n");
+			print_short_info_err(options);
+		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
 			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
@@ -1346,6 +1389,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(n_flag!=0) {
 			fprintf(stderr,"Error: -n is a client-only option.\n");
+			print_short_info_err(options);
+		}
+		if(options->seconds_to_end!=-1) {
+			fprintf(stderr,"Error: -z is a client-only option.\n");
 			print_short_info_err(options);
 		}
 	}
@@ -1411,6 +1458,22 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 	}
 	#endif
+
+	// -i and -z cannot be specified together
+	if(options->seconds_to_end!=-1 && options->duration_interval!=0) {
+		fprintf(stderr,"Error: -z and -i cannot be specified together, as -z will automatically compute a test duration.\n");
+		print_short_info_err(options);
+	}
+
+	// -z and -n cannot be specified together
+	// For the time being, the automatic computation of -t, like in the -n + -i case, is disabled when the test duration
+	// is computed with -z
+	// This is due to the fact that the test duration is not computed right now, but only as soon as the test is going to
+	// start, in order to try to be more accurate when computing it from the current time and from the time specified with -z
+	if(n_flag==1 && options->seconds_to_end!=-1) {
+		fprintf(stderr,"Error: you cannot specify -n and -z together, as the number of packets depends on the time in which the test will end.\n");
+		print_short_info_err(options);
+	}
 
 	// Manage the case in which both -n and -i are specified (if no -t is specified, it will be automatically inferred from -n/-i)
 	if(n_flag==1 && options->interval!=0 && options->duration_interval!=0) {
@@ -1644,4 +1707,22 @@ void options_set_destIPaddr(struct options *options, struct in_addr destIPaddr) 
 const char * latencyTypePrinter(latencytypes_t latencyType) {
 	// enum can be used as index array, provided that the order inside the definition of latencytypes_t is the same as the one inside latencyTypes[]
 	return latencyTypes[latencyType];
+}
+
+void setTestDurationEndTime(struct options *options) {
+	time_t currtime=time(NULL);
+	struct tm *now=localtime(&currtime);
+	time_t now_sec=now->tm_hour*3600+now->tm_min*60+now->tm_sec;
+
+	if(now_sec>options->seconds_to_end) {
+		options->duration_interval=options->seconds_to_end+86400-now_sec;
+	} else {
+		options->duration_interval=options->seconds_to_end-now_sec;
+
+		// A test should be executed for at least 1 seconds
+		// This is only a design choice; it may change in the future
+		if(options->duration_interval==0) {
+			options->duration_interval=1;
+		}
+	}
 }
