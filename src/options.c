@@ -222,7 +222,16 @@
 	"\t  https://graphite.readthedocs.io/en/latest/feeding-carbon.html#the-plaintext-protocol\n" \
 	"\t  Example (assuming a Carbon plaintext reciver running on loopback and listening on port 2003, flush interval = 2s): \n" \
 	"\t  '-g 2-127.0.0.1:2003-test.metrics.late' (TCP socket)\n" \
-	"\t  '-g 2-127.0.0.1:2003-test.metrics.late-u' (UDP socket)\n"
+	"\t  '-g 2-127.0.0.1:2003-test.metrics.late-u' (UDP socket)\n" \
+	"\t  Two packet loss metrics are flushed to Graphite. A 'local' packet loss metric, showing the number of packets which are\n" \
+	"\t  detected as lost during the current flush interval, looking locally for missing packets, and a 'net' packet loss metric,\n" \
+	"\t  which also takes into account that out-of-order packets may 'recover' losses detected in the previous flush intervals.\n" \
+	"\t  The 'net' metric may also be negative, as, for instance, a packet detected as lost in the previous interval (local=1,\n" \
+	"\t  net=1) may be received afterwards, out of order, 'cancelling' the previous loss. In this case, if no other packets are\n" \
+	"\t  lost (or received out of order), the 'local' loss will report '0', as, in the current interval, no packets are missing,\n" \
+	"\t  but the 'net' metric will report '-1' to indicate that the previously detected loss is not really a loss but it was due\n" \
+	"\t  to a an out-of-order packet. The 'net' metric can be aggregated (summed up) over larger intervals and it will indicate\n" \
+	"\t  the total number of losses.\n" 
 #define OPT_D_both \
 	"  -D: disable duplicate packet detection. Starting from LaTe 0.1.6, 20200626l, duplicated packets detection is enabled\n" \
 	"\t  by default. This, however, slightly increases the computational cost. If performance is a highly critical factor\n" \

@@ -33,6 +33,7 @@ static void carbonReportStructureReset(carbonReportStructure *report,uint8_t res
 	report->_detectedSeqNoReset=0;
 
 	report->lossCount=0;
+	report->netlossCount=0;
 
 	if(reset_dup_list) {
 		report->dupCount=0;
@@ -137,6 +138,7 @@ void carbonReportStructureUpdate(carbonReportStructure *report,uint64_t tripTime
 			if(report->lossCount>0 && seqNo>report->_precMaxSeqNumber) {
 				report->lossCount--;
 			}
+			report->netlossCount--;
 		}
 
 		// Compute the maximum received sequence number and try to see if there is a gap in the sequence numbers, which could
@@ -146,6 +148,7 @@ void carbonReportStructureUpdate(carbonReportStructure *report,uint64_t tripTime
 		if(seqNo>report->_maxSeqNumber && gap<SEQUENCE_NUMBERS_RESET_THRESHOLD) {
 			if(seqNo>report->_maxSeqNumber+1) {
 				report->lossCount+=seqNo-1-report->_maxSeqNumber;
+				report->netlossCount+=seqNo-1-report->_maxSeqNumber;
 			}
 
 			report->_maxSeqNumber=seqNo;
@@ -241,12 +244,21 @@ int carbonReportStructureFlush(carbonReportStructure *report,struct options *opt
 		return -3;
 	}
 
-	// Prepare buffer for the estimated packet loss count
-	snprintf(sockbuff,MAX_g_SOCK_BUF_SIZE,"%s.packetloss %" PRIu64 " %" PRIu64 "\n",opts->carbon_metric_path,report->lossCount,now.tv_sec);
+	// Prepare buffer for the estimated packet loss count (local)
+	snprintf(sockbuff,MAX_g_SOCK_BUF_SIZE,"%s.packetloss.local %" PRIu64 " %" PRIu64 "\n",opts->carbon_metric_path,report->lossCount,now.tv_sec);
 
 	// Send to Graphite
 	if(send(report->socketDescriptor,sockbuff,strlen(sockbuff),0)!=strlen(sockbuff)) {
-		fprintf(stderr,"%s() error: cannot send the out of order count metric to Carbon. Details: %s\n",__func__,strerror(errno));
+		fprintf(stderr,"%s() error: cannot send the packet loss count (local) metric to Carbon. Details: %s\n",__func__,strerror(errno));
+		return -3;
+	}
+
+	// Prepare buffer for the estimated packet loss count (net)
+	snprintf(sockbuff,MAX_g_SOCK_BUF_SIZE,"%s.packetloss.net %" PRIi64 " %" PRIu64 "\n",opts->carbon_metric_path,report->netlossCount,now.tv_sec);
+
+	// Send to Graphite
+	if(send(report->socketDescriptor,sockbuff,strlen(sockbuff),0)!=strlen(sockbuff)) {
+		fprintf(stderr,"%s() error: cannot send the packet loss count (net) metric to Carbon. Details: %s\n",__func__,strerror(errno));
 		return -3;
 	}
 
@@ -263,10 +275,12 @@ int carbonReportStructureFlush(carbonReportStructure *report,struct options *opt
 
 	if(opts->verboseFlag) {		
 		fprintf(stdout,"[INFO] Reporting the following metrics related to network reliability:\n"
-			"Current interval packet loss = %" PRIu64 "\n"
+			"Current interval packet loss (local) = %" PRIu64 "\n"
+			"Current interval packet loss (net) = %" PRIi64 "\n"
 			"Current interval out of order count = %" PRIu64 "\n"
 			"Current interval duplicated packet count = %" PRIu64 "\n",
 			report->lossCount,
+			report->netlossCount,
 			report->outOfOrderCount,
 			report->dupCount
 			);

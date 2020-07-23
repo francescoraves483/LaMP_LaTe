@@ -84,7 +84,8 @@ typedef struct carbonReportStructure {
 	uint8_t _detectedSeqNoReset; 	// [0,1] - = 0 if no sequence number cyclical reset has been detected in the current flush interval, = 1 otherwise
 
 	uint64_t outOfOrderCount;	// #
-	uint64_t lossCount;			// # - not reset after each data flush (updated over time)
+	uint64_t lossCount;			// #
+	int64_t netlossCount; 		// # - taking into account also out of order packets which were considered lost in previous intervals and have been now received (i.e. "recovered")
 
 	uint64_t dupCount; 					// # - updated only if -D is not specified
 	carbonDupStoreList dupCountList;	// Data struct - allocated and updated only if -D is not specified
