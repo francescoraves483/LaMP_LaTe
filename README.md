@@ -18,6 +18,8 @@ A simple **Makefile** is provided. This file can be used to compile LaTe in the 
 
 Additional targets are also defined; in particular:
 - `compilePCdebug`, to compile for the current platform, with `gcc` and the flag `-g` to generate debug informations, to be used with `gdb`.
+- `compilePCfull`, to compile an "extended" version of LaTe supporting also the **AMQP 1.0** protocol (option `-a`), thanks to the Qpid Proton library. In order to use this target and compile LaTe with the AMQP 1.0 support, you need to install Qpid Proton C first (it can be downloaded [here](https://qpid.apache.org/releases/qpid-proton-0.31.0/). To install it, after extracting the `.tar.gz` archive, you can refer to the instructions contained in the `INSTALL.md` file. Tested with versions [0.30.0](https://qpid.apache.org/releases/qpid-proton-0.30.0/) and 0.31.0.).
+- `compilePCfulldebug`, as `compilePCfull`, but adding the `-g` flag to generate debug informations, to be used with `gdb`.
 - `compileAPU`, as we also used **LaTe** to perform wireless latency measurements on [PC Engines APU1D embedded boards](https://pcengines.ch/apu1d.htm), running [OpenWrt](https://github.com/francescoraves483/OpenWrt-V2X), we defined an additional target to cross-compile LaTe for the boards. This command should work when targeting any **x86_64** embedded board running **OpenWrt**, after the toolchain has been properly set up (tested with OpenWrt 18.06.1). If you want to cross-compile LaTe for other Linux-based platforms, you will need to change the value of **CC_EMBEDDED** inside the Makefile with the compiler you need to use.
 - `compileAPUdebug`, as before, but with the `-g` flag to generate debug informations for `gdb`.
 
@@ -48,7 +50,7 @@ make
 
 The executable is called `LaTe`.
 
-\* In the current version, only **LaMP** over **IPv4** and **UDP** is supported, but we plan to implement other protocols in the future.
+\* In the current version, only **LaMP** over **IPv4** and **UDP** (and **LaMP** over **AMQP 1.0**, via the additional Qpid Proton module, when LaTe is compiled with `compilePCfull`) is supported, but we plan to implement other protocols in the future.
 
 **Docker images**
 
