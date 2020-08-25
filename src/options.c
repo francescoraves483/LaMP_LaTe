@@ -1165,7 +1165,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					fprintf(stderr,"Only one option between -B and -U is allowed.\n");
 					print_short_info_err(options);
 				}
-				fprintf(stderr,"Warning: the use of the -U option requires the system clock to be perfectly\n"
+				fprintf(stdout,"Please note: the use of the -U option requires the system clock to be perfectly\n"
 					"synchronized with a common reference.\n"
 					"In case you are not sure if the clock is synchronized, please use -B instead.\n");
 				break;
