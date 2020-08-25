@@ -1322,7 +1322,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(options->printAfter==1) {
 			fprintf(stderr,"Warning: -1 was specified but it will be ignored, as it is a server only option.\n");
 		}
-		if(options->mode_ub==UNIDIR && options->dup_detect_enabled) {
+		if(options->mode_ub==UNIDIR && options->dup_detect_enabled==0) {
 			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
 		}
 	} else if(options->mode_cs==SERVER) {
