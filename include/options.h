@@ -17,9 +17,9 @@
 #endif
 
 #if !AMQP_1_0_ENABLED
-#define SUPPORTED_PROTOCOLS "[-u]"
+#define SUPPORTED_PROTOCOLS "[-u | --udp]"
 #else
-#define SUPPORTED_PROTOCOLS "[-u, -a]"
+#define SUPPORTED_PROTOCOLS "[-u | --udp, -a | --amqp-1.0]"
 #endif
 
 #define INIT_CODE 0xAB

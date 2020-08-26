@@ -23,18 +23,148 @@
 #define STRINGIFY(value) STR(value)
 #define STR(value) #value
 
+// Long option names
+#define LONGOPT_M "mac-address"
+#define LONGOPT_i "test-duration"
+#define LONGOPT_n "num-packets"
+#define LONGOPT_p "port"
+#define LONGOPT_r "raw"
+#define LONGOPT_t "interval"
+#define LONGOPT_z "end-at-time"
+#define LONGOPT_A "ac"
+#define LONGOPT_C "confidence"
+#define LONGOPT_D "no-dup-detect"
+#define LONGOPT_F "follow-up"
+#define LONGOPT_L "latency-type"
+#define LONGOPT_P "payload-bytes"
+#define LONGOPT_R "random-interval"
+#define LONGOPT_T "client-timeout"
+#define LONGOPT_V "verbose"
+#define LONGOPT_f "report-file"
+#define LONGOPT_g "report-graphite"
+#define LONGOPT_o "report-file-overwrite"
+#define LONGOPT_w "report-socket"
+#define LONGOPT_W "report-perpacket"
+#define LONGOPT_y "report-perpacket-overwrite"
+#define LONGOPT_X "report-extra-data"
+#define LONGOPT_e "non-wireless"
+#define LONGOPT_I "ifindex"
+#define LONGOPT_N "bind-all"
+#define LONGOPT_S "ifname"
+
+#if AMQP_1_0_ENABLED
+#define LONGOPT_q "queue-topic"
+#define LONGOPT_H "broker-address"
+#endif
+
+#define LONGOPT_d "daemon"
+#define LONGOPT_0 "no-follow-up"
+#define LONGOPT_1 "print-after"
+#define LONGOPT_h "help"
+#define LONGOPT_v "version"
+#define LONGOPT_u "udp"
+#define LONGOPT_a "amqp-1.0"
+#define LONGOPT_c "client"
+#define LONGOPT_s "server"
+#define LONGOPT_l "loopback-client"
+#define LONGOPT_m "loopback-server"
+#define LONGOPT_B "bidir"
+#define LONGOPT_U "unidir"
+
+#define LONGOPT_t_client "interval"
+#define LONGOPT_t_server "server-timeout"
+#define LONGOPT_t_client_val 256
+#define LONGOPT_t_server_val 257
+
+#define LONGOPT_STR_CONSTRUCTOR(LONGOPT_STR) "  --"LONGOPT_STR"\n"
+
+// Long options "struct option" for getopt_long
+static const struct option late_long_opts[]={
+	{LONGOPT_M,			required_argument, 	NULL, 'M'},
+	{LONGOPT_i,			required_argument,	NULL, 'i'},
+	{LONGOPT_n,			required_argument,	NULL, 'n'},
+	{LONGOPT_p,			required_argument,	NULL, 'p'},
+	{LONGOPT_r,			no_argument, 		NULL, 'r'},
+	// There is no single "LONGOPT_t", as the short option -t has a different meaning for the client and the server
+	// Instead, two different long options are defined, with a value not corresponding to any ASCII character
+	// The effect is the same as using the short option '-t', with some additional consistency checking
+	{LONGOPT_t_client,	required_argument, 	NULL, LONGOPT_t_client_val},
+	{LONGOPT_t_server,	required_argument, 	NULL, LONGOPT_t_server_val},
+	{LONGOPT_z,			required_argument,	NULL, 'z'},
+	{LONGOPT_A,			required_argument,	NULL, 'A'},
+	{LONGOPT_C,			required_argument,	NULL, 'C'},
+	{LONGOPT_D,			no_argument,		NULL, 'D'},
+	{LONGOPT_F,			no_argument,		NULL, 'F'},
+	{LONGOPT_L,			required_argument,	NULL, 'L'},
+	{LONGOPT_P,			required_argument,	NULL, 'P'},
+	{LONGOPT_R,			required_argument,	NULL, 'R'},
+	{LONGOPT_T,			required_argument,	NULL, 'T'},
+	{LONGOPT_V,			no_argument,		NULL, 'V'},
+	{LONGOPT_f, 		required_argument,	NULL, 'f'},
+	{LONGOPT_g,			required_argument,	NULL, 'g'},
+	{LONGOPT_o, 		no_argument,		NULL, 'o'},
+	{LONGOPT_w,			required_argument,	NULL, 'w'},
+	{LONGOPT_W, 		required_argument,	NULL, 'W'},
+	{LONGOPT_y, 		no_argument,		NULL, 'y'},
+	{LONGOPT_X, 		required_argument,	NULL, 'X'},
+	{LONGOPT_e, 		no_argument,		NULL, 'e'},
+	{LONGOPT_I, 		required_argument,	NULL, 'I'},
+	{LONGOPT_N, 		no_argument,		NULL, 'N'},
+	{LONGOPT_S,			required_argument,	NULL, 'S'},
+
+	// AMQP 1.0 only
+	#if AMQP_1_0_ENABLED
+	{LONGOPT_q,			required_argument,	NULL, 'q'},
+	{LONGOPT_H,			required_argument,	NULL, 'H'},
+	#endif
+
+	{LONGOPT_d,			no_argument,		NULL, 'd'},
+	{LONGOPT_0,			no_argument,		NULL, '0'},
+	{LONGOPT_1,			no_argument,		NULL, '1'},
+
+	// Information options
+	{LONGOPT_h,			no_argument,		NULL, 'h'},
+	{LONGOPT_v,			no_argument,		NULL, 'v'},
+
+	// Protocols
+	{LONGOPT_u,			no_argument,		NULL, 'u'},
+	{LONGOPT_a,			no_argument,		NULL, 'a'},
+
+	// Client/server
+	{LONGOPT_c,			required_argument,	NULL, 'c'},
+	{LONGOPT_s,			no_argument,		NULL, 's'},
+	{LONGOPT_l,			no_argument,		NULL, 'l'},
+	{LONGOPT_m,			no_argument,		NULL, 'm'},
+
+	// Mode
+	{LONGOPT_B,			no_argument,		NULL, 'B'},
+	{LONGOPT_U,			no_argument,		NULL, 'U'},
+
+	// This array must always be terminated with a NULL element (as documented for getopt_long)
+	{NULL, 0, NULL, 0}
+};
+
+
 // Option strings: defined here the description for each option to be then included inside print_long_info()
 #define OPT_M_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_M) \
 	"  -M <destination MAC address>: specifies the destination MAC address.\n" \
 	"\t  Mandatory only if socket is RAW ('-r' is selected) and protocol is UDP.\n"
-#define OPT_q_client \
-	"  -q <queue name>: name of an AMQP queue or topic (prepend with topic://) to be used. Client and server\n" \
-	"\t  shall use the same queue name. This options applies only when AMQP 1.0 is used as a protocol.\n" \
-	"\t  Two queues will be created: one for producer-to-consumer communication (.tx will be appended) and\n" \
-	"\t  one from consumer-to-producer communication (.rx will be appended.\n"
+
+#if AMQP_1_0_ENABLED
+	#define OPT_q_client \
+		LONGOPT_STR_CONSTRUCTOR(LONGOPT_q) \
+		"  -q <queue name>: name of an AMQP queue or topic (prepend with topic://) to be used. Client and server\n" \
+		"\t  shall use the same queue name. This options applies only when AMQP 1.0 is used as a protocol.\n" \
+		"\t  Two queues will be created: one for producer-to-consumer communication (.tx will be appended) and\n" \
+		"\t  one from consumer-to-producer communication (.rx will be appended.\n"
+#endif
+
 #define OPT_n_client \
+		LONGOPT_STR_CONSTRUCTOR(LONGOPT_n) \
 	"  -n <total number of packets to be sent>: specifies how many packets to send (default: "STRINGIFY(CLIENT_DEF_NUMBER)").\n"
 #define OPT_i_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_i) \
 	"  -i <test duration in seconds>: specifies how much the test should last, in seconds. If specified together with\n" \
 	"\t  -n, and no periodicity is specified (with -t), the values of -i and -n will be used to automatically infer\n" \
 	"\t  the periodicity, for the purpose of having a test lasting <test duration in seconds>, with <total number of\n" \
@@ -43,13 +173,16 @@
 	"\t  In any case, no more than "STRINGIFY(UINT64_MAX)" packets can be sent and the test is terminated if the\n" \
 	"\t  duration is too long, when more than "STRINGIFY(UINT64_MAX)" packets would be sent.\n"
 #define OPT_z_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_z) \
 	"  -z <hour:minute:second at which the test should end>: specifies how much the test should last, by\n" \
 	"\t  making it last until the given hour, minute and second. For example, with -z 15:15:00, the test will\n" \
 	"\t  last until the local time is a quarter past 3 PM. The hours should be specified with a 24-hour format.\n" \
 	"\t  This option cannot be specified together with -i and/or -n (a periodicity value shall always be specified).\n"
 #define OPT_t_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_t_client) \
 	"  -t <time interval in ms>: specifies the periodicity, in milliseconds, to send at (default: "STRINGIFY(CLIENT_DEF_INTERVAL)" ms).\n"
 #define OPT_R_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_R) \
 	"  -R <random interval distrbution string>: allows the user to select a random periodicity, between\n" \
 	"\t  the packets which will be sent, instead of using a fixed one (i.e. instead of sending exactly\n" \
 	"\t  one packet every '-t' milliseconds). As argument, a string is expected, which should have the\n" \
@@ -76,57 +209,73 @@
 	"\t  uniform, as before, but with a batch size of 20 packets: -t 100 -R u10,20\n" \
 	"\t  truncated normal between 1 ms and 399 ms, mean: 200 ms, std dev: 4 ms, batch: 15: -t 200 -R n4,15\n"
 #define OPT_f_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_f) \
 	"  -f <filename, without extension>: print the report to a CSV file other than printing\n" \
 	"\t  it on the screen.\n" \
 	"\t  The default behaviour will append to an existing file; if the file does not exist,\n" \
 	"\t  it is created.\n"
 #define OPT_o_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_o) \
 	"  -o: valid only with '-f'; instead of appending to an existing file, overwrite it.\n"
 #define OPT_y_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_y) \
 	"  -y: valid only with '-W': instead of creating new CSV files when the specified one already exists, just\n" \
 	"\t  overwrite it.\n"
 #define OPT_P_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_P) \
 	"  -P <payload size in B>: specify a LaMP payload length, in bytes, to be included inside\n" \
 	"\t  the packet (default: 0 B).\n"
 #define OPT_r_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_r) \
 	"  -r: use raw sockets, if supported for the current protocol.\n" \
 	"\t  When '-r' is set, the program tries to insert the LaMP timestamp in the last \n" \
 	"\t  possible instant before sending. 'sudo' (or proper permissions) is required in this case.\n"
 #define OPT_A_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_A) \
 	"  -A <access category: BK | BE | VI | VO>: forces a certain EDCA MAC access category to\n" \
 	"\t  be used (patched kernel required!).\n"
 #define OPT_L_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_L) \
 	"  -L <latency type: u | r | s | h>: select latency type: user-to-user, KRT (Kernel Receive Timestamp),\n" \
 	"\t  software kernel transmit and receive timestamps (only when supported by the NIC) or hardware\n" \
 	"\t  timestamps (only when supported by the NIC)\n" \
 	"\t  Default: u. Please note that the client supports this parameter only when in bidirectional mode.\n"
 #define OPT_I_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_I) \
 	"  -I <interface index>: instead of using the first wireless/non-wireless interface, use the one with\n" \
 	"\t  the specified index. The index must be >= 0. Use -h to print the valid indeces. Default value: 0.\n"
 #define OPT_e_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_e) \
 	"  -e: use non-wireless interfaces instead of wireless ones. The default behaviour, without -e, is to\n" \
 	"\t  look for available wireless interfaces and return an error if none are found.\n"
 #define OPT_N_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_N) \
 	"  -N: instead of binding to a specific interface, bind to any local interface. Non raw sockets only.\n"
 #define OPT_S_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_S) \
 	"  -S <interface name>: instead of automatically looking for available interfaces, use a specific interface\n" \
 	"\t  which name is specified after this option. The suggestion is to rely on this option only when an interface\n" \
 	"\t  is not listed when using -h (it may happen for AF_INET interfaces related to 4G modules, for instance).\n"
 #define OPT_p_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_p) \
 	"  -p <port>: specifies the port to be used. Can be specified only if protocol is UDP (default: "STRINGIFY(DEFAULT_LATE_PORT)") or AMQP.\n"
 #define OPT_C_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_C) \
 	"  -C <confidence interval mask>: specifies an integer (mask) telling the program which confidence\n" \
 	"\t  intervals to display (0 = none, 1 = .90, 2 = .95, 3 = .90/.95, 4= .99, 5=.90/.99, 6=.95/.99\n" \
 	"\t  7=.90/.95/.99 (default: "STRINGIFY(DEF_CONFIDENCE_INTERVAL_MASK)").\n"
 #define OPT_F_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_F) \
 	"  -F: enable the LaMP follow-up mechanism. At the moment only the ping-like mode is supporting this.\n" \
 	"\t  This mechanism will send an additional follow-up message after each server reply, containing an\n" \
 	"\t  estimate of the server processing time, which is computed depending on the chosen latency type.\n"
 #define OPT_T_client \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_T) \
 	"  -T <time in ms>: Manually set a client timeout. The client timeout is always computed as:\n" \
 	"\t  ("STRINGIFY(MIN_TIMEOUT_VAL_C)" + x) ms if |-t value| <= "STRINGIFY(MIN_TIMEOUT_VAL_C)" ms or (|-t value| + x) ms if |-t value| > "STRINGIFY(MIN_TIMEOUT_VAL_C)" ms; with -T you can\n" \
 	"\t  set the 'x' value, in ms (default: " STRINGIFY(CLIENT_DEF_TIMEOUT)")\n"
 #define OPT_W_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_W) \
 	"  -W <filename, without extension>: write, for the current test only, the single packet latency\n" \
 	"\t  measurement data to the specified CSV file.\n" \
 	"\t  When this option is specified LaTe wull check if the specified .csv file already exists. If yes,\n" \
@@ -135,10 +284,12 @@
     "\t  available attempts have been performed, it will simply append to <filename>.csv.\n" \
 	"\t  Warning! This option may negatively impact performance.\n"
 #define OPT_V_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_V) \
 	"  -V: turn on verbose mode; this is currently work in progress but specifying this option will print\n" \
 	"\t  additional information when each test is performed. Not all modes/protocol will print more information\n" \
 	"\t  when this mode is activated.\n"
 #define OPT_w_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_w) \
 	"  -w <IPv4:port>: output per-packet and report data, just like -W and -f for a CSV file, to a socket, sending packets which\n" \
 	"\t  can then be read by any other application for further processing. To improve usability, the data is sent towards the\n" \
 	"\t  selected IPv4 and port in a textual, CSV-like, human-readable format.\n" \
@@ -174,32 +325,44 @@
 	"\t         depending on the user's needs.\n" \
 	"\t    2) Close any TCP socket which was left open before accepting a new connection on the same port.\n"
 #define OPT_X_both \
-	"  -X: when -W/-w is specified, it is possible to print extra single packet information by specifying some characters\n" \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_X) \
+	"  -X <chars>: when -W/-w is specified, it is possible to print extra single packet information by specifying some characters\n" \
 	"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n" \
 	"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n" \
 	"\t  when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n" \
 	"\t  up to the current packet and 'n' will print the minimum measured value up to the current packet.\n" \
 	"\t  'a' can be used as a shortcut to print all the available information.\n" \
 	"\t  This option is valid only when -W or -w (or both) is selected.\n"
-#define OPT_H_server \
-	"  -H: specify the address of the AMQP 1.0 broker.\n"
+
+#if AMQP_1_0_ENABLED
+	#define OPT_H_server \
+		LONGOPT_STR_CONSTRUCTOR(LONGOPT_H) \
+		"  -H: specify the address of the AMQP 1.0 broker.\n"
+#endif
+
 #define OPT_t_server \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_t_server) \
 	"  -t <timeout in ms>: specifies the timeout after which the connection should be\n" \
 	"\t  considered lost (minimum value: "STRINGIFY(MIN_TIMEOUT_VAL_S)" ms, otherwise "STRINGIFY(MIN_TIMEOUT_VAL_S)" ms will be automatically set - default: "STRINGIFY(SERVER_DEF_TIMEOUT)" ms).\n"
 #define OPT_d_server \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_d) \
 	"  -d: set the server in 'continuous daemon mode': as a session is terminated, the server\n" \
 	"\t  will be restarted and will be able to accept new packets from other clients.\n"
 #define OPT_L_server \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_L) \
 	"  -L <latency type: u | r>: select latency type: user-to-user or KRT (Kernel Receive Timestamp).\n" \
 	"\t  Default: u. Please note that the server supports this parameter only when in unidirectional mode.\n" \
 	"\t  If a bidirectional INIT packet is received, the mode is completely ignored.\n"
 #define OPT_0_server \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_0) \
 	"  -0: force refusing follow-up mode, even when a client is requesting to use it.\n"
 #define OPT_1_server \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_1) \
 	"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n" \
 	"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n" \
 	"\t  'printf' is called before sending a reply.\n"
 #define OPT_g_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_g) \
 	"  -g <options string>: send metrics to Carbon/Graphite (see https://graphiteapp.org/ for more information).\n" \
 	"\t  The <options string> should have the following format:\n" \
 	"\t  <flush interval in seconds>-<IPv4:port[,interface]>-<metrics path>[-<socket type>]\n" \
@@ -233,6 +396,7 @@
 	"\t  to a an out-of-order packet. The 'net' metric can be aggregated (summed up) over larger intervals and it will indicate\n" \
 	"\t  the total number of losses.\n" 
 #define OPT_D_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_D) \
 	"  -D: disable duplicate packet detection. Starting from LaTe 0.1.6, 20200626l, duplicated packets detection is enabled\n" \
 	"\t  by default. This, however, slightly increases the computational cost. If performance is a highly critical factor\n" \
 	"\t  and the network which is being tested is not affected by duplicated packets, this option can be used to disable\n" \
@@ -342,12 +506,12 @@ static int sock_params_parser(struct sock_params *sock_params_data, char *optarg
 
 static void print_long_info(void) {
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
-		"%s [-h]: print help and information about available interfaces (including indeces)\n"
-		"%s [-v]: print version information\n\n"
-		"-c: client mode\n"
-		"-s: server mode\n"
-		"-l: loopback client mode (send packets to first loopback interface - does not support raw sockets)\n"
-		"-m: loopback server mode (binds to the loopback interface - does not support raw sockets)\n\n"
+		"%s [-h | --"LONGOPT_h"]: print help and information about available interfaces (including indeces)\n"
+		"%s [-v | --"LONGOPT_v"]: print version information\n\n"
+		"-c | --"LONGOPT_c": client mode\n"
+		"-s | --"LONGOPT_s": server mode\n"
+		"-l | --"LONGOPT_l": loopback client mode (send packets to first loopback interface - does not support raw sockets)\n"
+		"-m | --"LONGOPT_m": loopback server mode (binds to the loopback interface - does not support raw sockets)\n\n"
 		"<destination address>:\n"
 		"  This is the destination address of the server. It depends on the protocol.\n"
 		"  UDP: <destination address> = <destination IP address>\n"
@@ -358,9 +522,8 @@ static void print_long_info(void) {
 
 		"[mode]:\n"
 		"  Client operating mode (the server will adapt its mode depending on the incoming packets).\n"
-		"  -B: ping-like bidirectional mode\n"
-		"  -U: unidirectional mode (requires clocks to be perfectly synchronized - highly experimental\n"
-		"\t  - use at your own risk!)\n"
+		"  -B | --"LONGOPT_B": ping-like bidirectional mode\n"
+		"  -U | --"LONGOPT_U": unidirectional mode (requires clocks to be perfectly synchronized via NTP or, better, PTP)\n"
 		#if AMQP_1_0_ENABLED
 		"\n"
 		"  When using AMQP 1.0, only -U is supported. The LaMP client will act as producer and the LaMP\n"
@@ -370,9 +533,9 @@ static void print_long_info(void) {
 
 		"[protocol]:\n"
 		"  Protocol to be used, in which the LaMP packets will be encapsulated.\n"
-		"  -u: UDP\n"
+		"  -u | --"LONGOPT_u": UDP\n"
 		#if AMQP_1_0_ENABLED
-		"  -a: AMQP 1.0 (using the Qpid Proton C library) - non raw sockets only - no loopback\n"
+		"  -a | --"LONGOPT_a": AMQP 1.0 (using the Qpid Proton C library) - non raw sockets only - no loopback\n"
 		#endif
 		"\n"
 
@@ -511,12 +674,12 @@ static void print_short_info_err(struct options *options) {
 	options_free(options);
 
 	fprintf(stdout,"\nUsage: %s [-c <destination address> [mode] | -l [mode] | -s | -m] [protocol] [options]\n"
-		"%s [-h]: print help\n"
-		"%s [-v]: print version information\n\n"
-		"-c: client mode\n"
-		"-s: server mode\n"
-		"-l: loopback client mode (send packets to first loopback interface - does not support raw sockets)\n"
-		"-m: loopback server mode (binds to the loopback interface - does not support raw sockets)\n\n",
+		"%s [-h | --"LONGOPT_h"]: print help\n"
+		"%s [-v | --"LONGOPT_v"]: print version information\n\n"
+		"-c | --"LONGOPT_c": client mode\n"
+		"-s | --"LONGOPT_s": server mode\n"
+		"-l | --"LONGOPT_l": loopback client mode (send packets to first loopback interface - does not support raw sockets)\n"
+		"-m | --"LONGOPT_m": loopback server mode (binds to the loopback interface - does not support raw sockets)\n\n",
 		PROG_NAME_SHORT,PROG_NAME_SHORT,PROG_NAME_SHORT);
 
 	exit(EXIT_FAILURE);
@@ -622,6 +785,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t T_flag=0; // = 1 if -T was specified, otherwise = 0
 	uint8_t N_flag=0; // = 1 if -N was specified, otherwise = 0
 	uint8_t n_flag=0; // = 1 if -n was specified, otherwise = 0
+	uint8_t t_long_flag=0; // = 0 if no long option for -t is specified, = 1 if --interval is specified, = 2 if --server-timeout is specified, = 3 if just the short option (-t) is specified
 
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
@@ -639,8 +803,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		return 1;
 	}
 
-	while ((char_option=getopt(argc, argv, VALID_OPTS)) != EOF) {
+	while ((char_option=getopt_long(argc, argv, VALID_OPTS, late_long_opts, NULL)) != EOF) {
 		switch(char_option) {
+			case 0:
+				fprintf(stderr,"Error. An unexpected error occurred when parsing the options.\n"
+					"Please report to the developers that getopt_long() returned 0. Thank you.\n");
+				exit(EXIT_FAILURE);
+				break;
+
 			case 'h':
 				print_long_info();
 				break;
@@ -667,6 +837,13 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				break;
 
 			case 't':
+			case LONGOPT_t_client_val:
+			case LONGOPT_t_server_val:
+				if(t_long_flag!=0) {
+					fprintf(stderr,"Error: you cannot specify more than one time -t, --interval or --server-timeout.\n");
+					print_short_info_err(options);
+				}
+
 				errno=0; // Setting errno to 0 as suggested in the strtoul() man page
 				options->interval=strtoul(optarg,&sPtr,0);
 				if(sPtr==optarg) {
@@ -675,6 +852,14 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				} else if(errno) {
 					fprintf(stderr,"Error in parsing the time interval.\n");
 					print_short_info_err(options);
+				}
+
+				if(char_option==LONGOPT_t_client_val) {
+					t_long_flag=1;
+				} else if(char_option==LONGOPT_t_server_val) {
+					t_long_flag=2;
+				} else {
+					t_long_flag=3;
 				}
 				break;
 
@@ -1325,6 +1510,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		if(options->mode_ub==UNIDIR && options->dup_detect_enabled==0) {
 			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
 		}
+		if(t_long_flag==2) {
+			fprintf(stderr,"Error: --server-timeout is a server only option.\n");
+			print_short_info_err(options);
+		}
 	} else if(options->mode_cs==SERVER) {
 		if(options->mode_ub!=UNSET_MUB) {
 			fprintf(stderr,"Warning: -B or -U was specified, but in server (-s) mode these parameters are ignored.\n");
@@ -1351,6 +1540,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: -z is a client-only option.\n");
 			print_short_info_err(options);
 		}
+		if(t_long_flag==1) {
+			fprintf(stderr,"Error: --interval is a client only option.\n");
+			print_short_info_err(options);
+		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
 			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
@@ -1369,6 +1562,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(options->mode_ub==UNIDIR && options->dup_detect_enabled) {
 			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
+		}
+		if(t_long_flag==2) {
+			fprintf(stderr,"Error: --server-timeout is a server only option.\n");
+			print_short_info_err(options);
 		}
 	} else if(options->mode_cs==LOOPBACK_SERVER) {
 		if(eI_flag==1) {
@@ -1402,6 +1599,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 		if(options->seconds_to_end!=-1) {
 			fprintf(stderr,"Error: -z is a client-only option.\n");
+			print_short_info_err(options);
+		}
+		if(t_long_flag==1) {
+			fprintf(stderr,"Error: --interval is a client only option.\n");
 			print_short_info_err(options);
 		}
 	}
