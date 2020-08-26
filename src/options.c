@@ -23,7 +23,7 @@
 #define STRINGIFY(value) STR(value)
 #define STR(value) #value
 
-// Long option names
+// Names for the long options
 #define LONGOPT_M "mac-address"
 #define LONGOPT_i "test-duration"
 #define LONGOPT_n "num-packets"
@@ -78,7 +78,7 @@
 
 #define LONGOPT_STR_CONSTRUCTOR(LONGOPT_STR) "  --"LONGOPT_STR"\n"
 
-// Long options "struct option" for getopt_long
+// Long options "struct option" array for getopt_long
 static const struct option late_long_opts[]={
 	{LONGOPT_M,			required_argument, 	NULL, 'M'},
 	{LONGOPT_i,			required_argument,	NULL, 'i'},
@@ -87,7 +87,8 @@ static const struct option late_long_opts[]={
 	{LONGOPT_r,			no_argument, 		NULL, 'r'},
 	// There is no single "LONGOPT_t", as the short option -t has a different meaning for the client and the server
 	// Instead, two different long options are defined, with a value not corresponding to any ASCII character
-	// The effect is the same as using the short option '-t', with some additional consistency checking
+	// The effect is the same as using the short option '-t', with some additional consistency checking (see the switch-case 
+	// inside parse_options())
 	{LONGOPT_t_client,	required_argument, 	NULL, LONGOPT_t_client_val},
 	{LONGOPT_t_server,	required_argument, 	NULL, LONGOPT_t_server_val},
 	{LONGOPT_z,			required_argument,	NULL, 'z'},
@@ -785,7 +786,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	uint8_t T_flag=0; // = 1 if -T was specified, otherwise = 0
 	uint8_t N_flag=0; // = 1 if -N was specified, otherwise = 0
 	uint8_t n_flag=0; // = 1 if -n was specified, otherwise = 0
-	uint8_t t_long_flag=0; // = 0 if no long option for -t is specified, = 1 if --interval is specified, = 2 if --server-timeout is specified, = 3 if just the short option (-t) is specified
+	uint8_t t_long_flag=0; // = 0 if neither -t, nor --interval/--server-timeout have been specified, = 1 if --interval is specified, = 2 if --server-timeout is specified, = 3 if just the short option (-t) is specified
 
 	char *sPtr; // String pointer for strtoul() and strtol() calls.
 	size_t filenameLen=0; // Filename length for the '-f' mode
