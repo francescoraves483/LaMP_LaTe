@@ -12,7 +12,7 @@ This repository is the main one for what concerns both **LaTe** and the **LaMP**
 As we are still in a beta stage, we highly welcome any contribution, improvement, bug report or suggestion, both to **LaTe** and to the **LaMP** specifications.
 Other than using GitHub, you can freely write to <francescorav.es483@gmail.com>: we will try to reply you as soon as possible. Thank you!
 
-\* In the current version, only **LaMP** over **IPv4** and **UDP** (and **LaMP** over **AMQP 1.0**, via the additional Qpid Proton module, when LaTe is compiled with `compilePCfull`) is supported, but we plan to implement other protocols in the future.
+\* In the current version, only **LaMP** over **IPv4** and **UDP** is supported, but we plan to implement other protocols in the future. **LaMP** over **AMQP 1.0**, via an additional Qpid Proton module, is also supported when LaTe is compiled with `compilePCfull`.
 
 ## Makefile
 
@@ -65,22 +65,22 @@ For the latest options and their description, please refer to the help available
 LaTe supports different modes, based on the **client-server** paradigm, which is the one supported by LaMP.
 The first command line argument should correspond to the desired mode (both short options and equivalent long options are available for each mode):
 
-- **-c \<destination address\>** \| **--client**: client mode
-- **-s** \| **--server**: server mode
-- **-l** \| **--loopback-client**: client mode, binding to a loopback interface
-- **-m** \| **--loopback-server**: server mode, binding to a loopback interface
+- **\-c \<destination address\>** \| **\-\-client \<destination address\>**: client mode
+- **\-s** \| **\-\-server**: server mode
+- **\-l** \| **\-\-loopback-client**: client mode, binding to a loopback interface
+- **\-m** \| **\-\-loopback-server**: server mode, binding to a loopback interface
   
 Alternatively, it is possible to specify:
-- **-h** \| **--help**: to print the long version of the help, directly within LaTe, including the available interfaces and their internal indeces, to be passed to LaTe using _-I_.
-- **-v** \| **--version**: to print additional version information
+- **\-h** \| **\-\-help**: to print the long version of the help, directly within LaTe, including the available interfaces and their internal indeces, to be passed to LaTe using _-I_.
+- **\-v** \| **\-\-version**: to print additional version information
 
 *-v* or *-h* should be used alone, without any additional parameter.
 
-When *-c* (or *--client*) is selected, the destination address must be specified, depending on the protocol. **In UDP mode, this address corresponds to the destination IPv4 address.**
+When *-c* (or *\-\-client*) is selected, the destination address must be specified, depending on the protocol. **In UDP mode, this address corresponds to the destination IPv4 address.**
 
 When a client (either *-c* or *-l*) is selected, just after *-c/-l*, a mode has to be specified:
-- **-B** (or **--bidir**) for the standard ping-like bidirectional mode, working like ICMP Echo Request/Reply, but in a client-server fashion (read also the [LaMP specifications](./LaMP/LaMP_specifications_rev2.0.pdf)). This mode allows the user to test the RTT.
-- **-U** (or **--unidir**) for a unidirectional testing mode, in which the client sends a LaMP packet to the server, and the latter tries to compute a unidirectional latency, based on its own timestamp and on the one embedded inside the packet by the client, without the need of generating a reply. It works only if there is an external way of keeping the devices’ clocks perfectly synchronized, with, if possible, sub-ms precision. One way of synchronizing the clocks of the devices running LaTe is relying on the Precision Time Protocol (*PTP* - for instance with tools like `ptp4l`/`phc2sys` or `ptpd`).
+- **\-B** (or **\-\-bidir**) for the standard ping-like bidirectional mode, working like ICMP Echo Request/Reply, but in a client-server fashion (read also the [LaMP specifications](./LaMP/LaMP_specifications_rev2.0.pdf)). This mode allows the user to test the RTT.
+- **\-U** (or **\-\-unidir**) for a unidirectional testing mode, in which the client sends a LaMP packet to the server, and the latter tries to compute a unidirectional latency, based on its own timestamp and on the one embedded inside the packet by the client, without the need of generating a reply. It works only if there is an external way of keeping the devices’ clocks perfectly synchronized, with, if possible, sub-ms precision. One way of synchronizing the clocks of the devices running LaTe is relying on the Precision Time Protocol (*PTP* - for instance with tools like `ptp4l`/`phc2sys` or `ptpd`).
 
 ## Protocols
 
@@ -88,15 +88,15 @@ A protocol should be then specified. As of now, LaTe supports latency measuremen
 If an "extended" version of LaTe is compiled with `compilePCfull` or `compilePCfulldebug` and the Qpid Proton AMQP 1.0 library is installed, also latency measurements with AMQP 1.0 and a compatible message broker are possible.
 
 Protocols are specified through specific arguments. Supported protocols are:
-- **-u** \| **--udp**: UDP (LaMP over UDP)
-- **-a** \| **--amqp-1.0**: AMQP 1.0 (LaMP over AMQP 1.0 - only when `compilePCfull`/`compilePCfulldebug` is used to compile LaTe and Qpid Proton is installed)
+- **\-u** \| **\-\-udp**: UDP (LaMP over UDP)
+- **\-a** \| **\-\-amqp-1.0**: AMQP 1.0 (LaMP over AMQP 1.0 - only when `compilePCfull`/`compilePCfulldebug` is used to compile LaTe and Qpid Proton is installed)
 
 
 ## Client and server specific options
 
 Then, client and sever specific options should be specified.
 
-You can find a complete description of these options after compiling LaTe and calling it with the **-h** (or **--help**) option.
+You can find a complete description of these options after compiling LaTe and calling it with the **\-h** (or **\-\-help**) option.
 
 Each option is described, inside LaTe, in this format:
 ```
@@ -165,13 +165,13 @@ Some of these examples of usage are also displayed when calling the program with
 Few important notes about **LaTe** are listed below:
 
 - In order to use raw sockets, root privileges are needed.
-- Time intervals less or equal to 0 ms are not supported and will generate an error (i.e., after *-t*, or *--interval*, a number *>= 1* should be specified), as they would make no sense in this context.
+- Time intervals less or equal to 0 ms are not supported and will generate an error (i.e., after *-t*, or *\-\-interval*, a number *>= 1* should be specified), as they would make no sense in this context.
 - When in UDP mode, LaMP payloads are supported up to 1448 B, in order not to exceed the Ethernet MTU, which would case fragmentation in non-raw mode and a transmission error in raw mode.
-- When raw sockets are used (i.e. *-r* or *--raw* is specified), a destination MAC address should be specified with *-M* (or *--mac*).
+- When raw sockets are used (i.e. *-r* or *\-\-raw* is specified), a destination MAC address should be specified with *-M* (or *\-\-mac*).
 - Specifying a port is required when working with LaMP over UDP (i.e. when using the *-u* option). If no port is specified, the program will use `46000` as default value.
 - The server will adapt its mode (bidirectional or unidirectional) depending on the packets it receives from the client. Therefore, specifying *-B* or *-U* for a server will have no effect.
 - When in non-raw mode, the destination MAC address is not required. If specified with *-M*, however, it won’t generate an error, but it will be simply ignored by LaTe.
-- Even though it is possible to choose which confidence intervals to display, through option *-C* (or *--confidence*), a CSV file will always contain all of them (.90, .95 and .99).
+- Even though it is possible to choose which confidence intervals to display, through option *-C* (or *\-\-confidence*), a CSV file will always contain all of them (.90, .95 and .99).
 - There is currently no support yet for software kernel transmit and receive timestamps and hardware timestamps when in raw or unidirectional mode.
 - The hardware timestamp feature is still partly experimental: it should work properly, and several tests have been performed on supported NICs, but more testing is still required and ongoing.
 
@@ -185,11 +185,13 @@ In order to compute the delay, LaTe compares transmit and receive timestamps (ma
 
 **KRT - Kernel Receive Timestamp (‘r’)**: this mode is the one used by iputils ping (if this is wrong, please correct us) to compute the latency with ICMP Echo packets, at least in a standard case. The transmit timestamp is obtained like in the User-to-user mode, but the receive one is obtained directly from the Linux kernel, as every packet is received. These timestamps are still software timestamps, and, according to the kernel documentation, they should be “generated just after a device driver hands a packet to the kernel receive stack”. This allows to reduce the application latency contribution from the receiver side when measuring the delay.
 
-**Software transmit and receive timestamps ('s')**: this mode is available only if supported by the NIC and by the driver. Both the transmit (sender) and the receive (receiver) timestamps are obtained from the Linux kernel, as every request is sent and every reply is received. This feature relies on ancillary data and [CMSG](http://man7.org/linux/man-pages/man3/cmsg.3.html). *This latency type, as of now, is supported only for RTT measurements (i.e. in -B mode) and when non-raw sockets are used (i.e. no -r is specified)*
+**Software transmit and receive timestamps ('s')**: this mode is available only if supported by the NIC and by the driver. Both the transmit (sender) and the receive (receiver) timestamps are obtained from the Linux kernel, as every request is sent and every reply is received. This feature relies on ancillary data and [CMSG](http://man7.org/linux/man-pages/man3/cmsg.3.html). *This latency type, as of now, is supported only for RTT measurements (i.e. in -B mode) and when non-raw sockets are used (i.e. no -r is specified).*
+
 Example of supported NICs: Intel I219-V, Intel i210AT.
 
 **Hardware transmit and receive timestamps ('h')**: this mode is available only if supported by the NIC and by the driver. Both the transmit and the receive timestamps (which are then compared to compute the latency) are obtained from the network adapter, as every request is sent and every reply is received, so, no kernel time should be considered. This feature relies on ancillary data and [CMSG](http://man7.org/linux/man-pages/man3/cmsg.3.html). *This latency type, as of now, is supported only for RTT measurements (i.e. in -B mode) and when non-raw sockets are used (i.e. no -r is specified).*
-Example of supported NICs: Intel I219-V, Intel i210AT. Although it could be very useful, we were unable to find any USB-to-Ethernet adapter supporting hardware timestamps (as, normally, they use ASIX or Realtek chipsets).
+
+Example of supported NICs: Intel I219-V, Intel i210AT. Although it could be very useful, we were not able to find any USB-to-Ethernet adapter supporting hardware timestamps (as, normally, they use ASIX or Realtek chipsets).
 
 
 ## How does the client/server work?
@@ -204,9 +206,9 @@ In **bidirectional** mode, the server will try to reply at each client request, 
 
 In **unidirectional mode**, the server will try to compute the latency from the timestamp embedded by the client inside each LaMP packet, sending back to the client the report data as the session finishes, for visualization.
 
-At the end of the session, the average, minimum and maximum latency values will be reported, together with other metrics, including the number of lost packets and an indicative measure of the out-of-order count, as the number of times a decreasing sequence number is detected in the received packets (i.e. in the received replies). If *-f* (or *--report-file*) is specified, this data will also be written to a *.csv* file.
+At the end of the session, the average, minimum and maximum latency values will be reported, together with other metrics, including the number of lost packets and an indicative measure of the out-of-order count, as the number of times a decreasing sequence number is detected in the received packets (i.e. in the received replies). If *-f* (or *\-\-report-file*) is specified, this data will also be written to a *.csv* file.
 
-This data can also be reported to Graphite, by relying on *-g* (or *--report-graphite*).
+This data can also be reported to Graphite, by relying on *-g* (or *\-\-report-graphite*).
 
 Both client and server have a timeout set on the sockets they use to receive and send data. After few seconds of inactivity, they will declare the connection as terminated and terminate their execution (or, in case a daemon mode server is launched, a new session will start).
 
@@ -215,7 +217,7 @@ Both the client and the server follow the [LaMP specifications](./LaMP/LaMP_spec
 
 ## How does the server daemon mode work?
 
-When *-d* (or *--daemon*) is specified on a server, a special daemon mode will be activated.
+When *-d* (or *\-\-daemon*) is specified on a server, a special daemon mode will be activated.
 
 When using this mode, the server will not terminate its execution after a session is correctly (or badly, due to an error) terminated, but it will, instead, start again listening for a client willing to connect. This allows to launch a single server for multiple successive client connections and measurement sessions.
 
@@ -231,7 +233,7 @@ This mechanism may be suject to changes in the future.
 
 # Version information
 
-The current version is **0.1.6-beta**, using **LaMP rev 2.0** and **Rawsock library v0.3.3**.
+The current non-development version is **0.1.6-beta**, using **LaMP rev 2.0** and **Rawsock library v0.3.3**.
 
 Developed in **Politecnico di Torino**, licensed under **GPLv2**.
 
