@@ -4,7 +4,7 @@
 
 ![](./docs/pics/LaMP_logo.png)
 
-**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.6-beta-development_
+**LaTe** - Flexible, client-server, multi-protocol* **La**tency **Te**ster, based on the custom **LaMP** protocol (**La**tency **M**easurement **P**rotocol) and running on **Linux** - _version 0.1.6-beta_
 
 This repository is the main one for what concerns both **LaTe** and the **LaMP** custom protocol, including its specifications.
 
@@ -40,7 +40,6 @@ Please note that in order to compile Qpid Proton on Android, you may need to man
 Clone this repository (`--recursive` is needed in order to clone the Rawsock library submodule too):
 ```
 git clone --recursive https://github.com/francescoraves483/LaMP_LaTe.git
-git checkout development --recurse-submodules
 cd LaMP_LaTe
 ```
 Compile:
@@ -58,7 +57,7 @@ Docker images are also available, launching a LaTe server in daemon mode (see th
 
 At the moment two images are available: one for testing over wired interfaces and one for testing over wireless interfaces.
 
-**Warning:** Docker images may not include the latest version of LaTe.
+**Warning:** Docker images does not include, for the time being, the latest version of LaTe.
 
 
 ![](./docs/pics/EU_flag.jpg)

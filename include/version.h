@@ -2,9 +2,9 @@
 #define LATENCYTEST_VERSION_H_INCLUDED
 
 #if !AMQP_1_0_ENABLED
-#define VERSION "0.1.6-beta-development"
+#define VERSION "0.1.6-beta"
 #else
-#define VERSION "0.1.6-beta-development - AMQP 1.0 support"
+#define VERSION "0.1.6-beta - AMQP 1.0 support"
 #endif
 #define DATE "20200826e"
 #define PROG_NAME_LONG "LaTe tool"
