@@ -4,7 +4,7 @@ description: Home page for LaTe, the flexible Latency Tester, and LaMP, a custom
 show_downloads: true
 
 github:
-  zip_url: https://github.com/francescoraves483/LaMP_LaTe/archive/v0.1.5-beta.zip
-  tar_url: https://github.com/francescoraves483/LaMP_LaTe/archive/v0.1.5-beta.tar.gz
+  zip_url: https://github.com/francescoraves483/LaMP_LaTe/archive/v0.1.6-beta.zip
+  tar_url: https://github.com/francescoraves483/LaMP_LaTe/archive/v0.1.6-beta.tar.gz
   owner_name: Politecnico di Torino
   lampspec_url: https://francescoraves483.github.io/LaMP_LaTe/LaMP/LaMP_specifications_rev2.0.pdf
