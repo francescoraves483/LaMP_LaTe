@@ -208,7 +208,7 @@ In **unidirectional mode**, the server will try to compute the latency from the 
 
 At the end of the session, the average, minimum and maximum latency values will be reported, together with other metrics, including the number of lost packets and an indicative measure of the out-of-order count, as the number of times a decreasing sequence number is detected in the received packets (i.e. in the received replies). If *-f* (or *\-\-report-file*) is specified, this data will also be written to a *.csv* file.
 
-This data can also be reported to Graphite, by relying on *-g* (or *\-\-report-graphite*).
+The same metrics can also be sent to [Graphite](https://graphiteapp.org/), by using on the *-g* option (or its equivalent version: *\-\-report-graphite*). More details on this option are available when calling LaTe with **\-\-help**.
 
 Both client and server have a timeout set on the sockets they use to receive and send data. After few seconds of inactivity, they will declare the connection as terminated and terminate their execution (or, in case a daemon mode server is launched, a new session will start).
 
