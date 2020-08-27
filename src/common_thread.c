@@ -14,6 +14,12 @@ void thread_error_print(const char *name, t_error_types err) {
 		case ERR_SETTIMER:
 			fprintf(stderr,"%s reported an error in timerfd_settime().\n",name);
 			break;
+		case ERR_STOPTIMER:
+			fprintf(stderr,"%s reported an error when trying to stop the periodic interval timer.\n",name);
+			break;
+		case ERR_RANDSETTIMER:
+			fprintf(stderr,"%s reported an error when trying to set again the timer to a random value.\n",name);
+			break;
 		case ERR_SEND_INIT:
 			fprintf(stderr,"%s reported an error in sending the LaMP INIT packet.\n",name);
 			break;
@@ -25,6 +31,9 @@ void thread_error_print(const char *name, t_error_types err) {
 			break;
 		case ERR_TIMEOUT:
 			fprintf(stderr,"%s reported an error: reception timed out.\n",name);
+			break;
+		case ERR_REPORT_TIMEOUT:
+			fprintf(stderr,"%s reported an error: reception timed out when waiting for a REPORT.\n",name);
 			break;
 		case ERR_TIMEOUT_ACK:
 			fprintf(stderr,"%s reported an error: reception timed out when waiting for an ACK.\n",name);
@@ -52,6 +61,9 @@ void thread_error_print(const char *name, t_error_types err) {
 			break;
 		case ERR_TXSTAMP:
 			fprintf(stderr,"%s reported an error when retrieving the TX timestamp in hardware mode. Try using another mode.\n",name);
+			break;
+		case ERR_CLEAR_TIMER_EVENT:
+			fprintf(stderr,"%s reported a timer error: a timer event could not be read and the execution was terminated.\n",name);
 			break;
 		default:
 			fprintf(stderr,"%s reported a generic error.\n",name);

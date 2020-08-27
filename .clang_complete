@@ -1,4 +1,7 @@
 -pthread
 -m
+-qpid-proton
 -IRawsock_lib/Rawsock_lib
 -Iinclude
+-Iinclude/qpid_proton
+-DAMQP_1_0_ENABLED=1

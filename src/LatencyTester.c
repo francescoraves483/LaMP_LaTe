@@ -13,6 +13,15 @@
 #include <signal.h>
 #include "common_socket_man.h"
 #include <errno.h>
+#include "report_manager.h"
+
+#if AMQP_1_0_ENABLED
+#include <proton/proactor.h>
+#include <proton/transport.h>
+
+#include "qpid_proton_producer.h"
+#include "qpid_proton_consumer.h"
+#endif
 
 static volatile sig_atomic_t end_prog_flag=0;
 
@@ -31,73 +40,32 @@ int main (int argc, char **argv) {
 	struct options opts;
 
 	// wlanLookup() variables, for interface name, source MAC address and return value
-	macaddr_t srcmacaddr=NULL; // Initial value = NULL - if mode is not RAW, it will be left = NULL, and no source MAC will be obtained
-	int ret_wlanl_val;
-	int ifindex;
-	struct in_addr srcIPaddr;
+	struct src_addrs addresses={.srcmacaddr=NULL}; // Initial value = NULL - if mode is not RAW, it will be left = NULL, and no source MAC will be obtained
 
 	/* Socket management structure (containing a socket descriptor and a struct sockaddr_ll, see rawsock_lamp.h) */
 	struct lampsock_data sData;
 
+	#if AMQP_1_0_ENABLED
+	// AMQP 1.0 management structure
+	struct amqp_data aData={.Wfiledescriptor=0};
+	#endif
+
 	// Rx timeout structure
 	struct timeval rx_timeout;
 
-	// wlanLookup index
-	int wlanLookupIdx=0;
+	// AMQP structures (defined only if AMQP 1.0 is enabled)
+	#if AMQP_1_0_ENABLED
+	char proactor_address_buff[PN_MAX_ADDR];
+	#endif
+
+	// Data for the UDP Socket when -w is specified
+	report_sock_data_t sock_w_data;
 
 	// Read options from command line
 	options_initialize(&opts);
 	if(parse_options(argc, argv, &opts)) {
 		fprintf(stderr,"Error while parsing the options.\n");
 		exit(EXIT_FAILURE);
-	}
-
-	// Set wlanLookupIdx, depending on the mode (loopback vs normal mode)
-	if(opts.mode_cs==LOOPBACK_CLIENT || opts.mode_cs==LOOPBACK_SERVER) {
-		wlanLookupIdx=WLANLOOKUP_LOOPBACK;
-	} else {
-		wlanLookupIdx=opts.if_index;
-	}
-
-	// Allocate memory for the source MAC address (only if 'RAW' is specified)
-	if(opts.mode_raw==RAW) {
-		srcmacaddr=prepareMacAddrT();
-		if(macAddrTypeGet(srcmacaddr)==MAC_NULL) {
-			fprintf(stderr,"Error: could not allocate memory to store the source MAC address.\n");
-			exit(EXIT_FAILURE);
-		}
-	}
-
-	// Null the devname field in sData
-	memset(&sData.devname,0,IFNAMSIZ*sizeof(char));
-
-	// Look for available wireless/non-wireless interfaces
-	ret_wlanl_val=wlanLookup(sData.devname,&ifindex,srcmacaddr,&srcIPaddr,wlanLookupIdx,opts.nonwlan_mode==0 ? WLANLOOKUP_WLAN : WLANLOOKUP_NONWLAN);
-	if(ret_wlanl_val<=0) {
-		rs_printerror(stderr,ret_wlanl_val);
-		exit(EXIT_FAILURE);
-	}
-
-	if(opts.mode_raw==RAW) {
-		if(opts.destIPaddr.s_addr==srcIPaddr.s_addr) {
-		fprintf(stderr,"Error: you cannot test yourself in raw mode.\n"
-			"Use non raw sockets instead.\n");
-		exit(EXIT_FAILURE);
-		}
-
-		// Just for the sake of safety, check if wlanLookup() was able to properly write the source MAC address
-		if(macAddrTypeGet(srcmacaddr)==MAC_BROADCAST || macAddrTypeGet(srcmacaddr)==MAC_NULL) {
-			fprintf(stderr,"Could not retrieve source MAC address.\n");
-			exit(EXIT_FAILURE);
-		}
-	}
-
-	// Print current interface name
-	fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",sData.devname,ifindex);
-
-	// In loopback mode, set the destination IP address as the source one, inside the 'options' structure
-	if(opts.mode_cs==LOOPBACK_CLIENT || opts.mode_cs==LOOPBACK_SERVER) {
-		options_set_destIPaddr(&opts,srcIPaddr);
 	}
 
 	// Print an info message when in continuous daemon mode
@@ -110,74 +78,36 @@ int main (int argc, char **argv) {
 		(void) signal(SIGUSR1,end_prog_hdlr);
 	}
 
-	do {
-		// Open socket, discriminating the raw and non raw cases
-		switch(opts.mode_raw) {
-			case RAW:
-				// Workaraound for hardware receive timestamps: ETH_P_ALL does not seem to generate
-				// receive timestamps, as of now. So, as UDP only is currently supported, use ETH_P_IP
-				// instead of ETH_P_ALL. This will hopefully change in the future.
-				sData.descriptor=socket(AF_PACKET,SOCK_RAW,htons(ETH_P_IP));
-
-				if(sData.descriptor==-1) {
-					perror("socket() error");
-					exit(EXIT_FAILURE);
-				}
-
-				// Prepare sockaddr_ll structure
-				memset(&(sData.addru.addrll),0,sizeof(sData.addru.addrll));
-				sData.addru.addrll.sll_ifindex=ifindex;
-				sData.addru.addrll.sll_family=AF_PACKET;
-				sData.addru.addrll.sll_protocol=htons(ETH_P_IP);
-
-				// Bind to the specified interface
-				if(bind(sData.descriptor,(struct sockaddr *) &(sData.addru.addrll),sizeof(sData.addru.addrll))<0) {
-					perror("Cannot bind to interface: bind() error");
-			  		close(sData.descriptor);
-			  		exit(EXIT_FAILURE);
-				}
-			break;
-			case NON_RAW:
-				// Add a nested switch case here when more than one protocol will be implemented (*)
-				sData.descriptor=socketCreator(UDP);
-
-				if(sData.descriptor==-1) {
-					perror("socket() error");
-					exit(EXIT_FAILURE);
-				}
-
-				// case UDP: (*) - when more than one protocol will be implemented...
-				// Prepare bind sockaddr_in structure (index 0)
-				memset(&(sData.addru.addrin[0]),0,sizeof(sData.addru.addrin[0]));
-				sData.addru.addrin[0].sin_family=AF_INET;
-
-				if(opts.mode_cs==CLIENT || opts.mode_cs==LOOPBACK_CLIENT) {
-					sData.addru.addrin[0].sin_port=0;
-				} else if(opts.mode_cs==SERVER || opts.mode_cs==LOOPBACK_SERVER) {
-					sData.addru.addrin[0].sin_port=htons(opts.port);
-				}
-
-				sData.addru.addrin[0].sin_addr.s_addr=srcIPaddr.s_addr;
-
-				// Bind to the specified interface
-				if(bind(sData.descriptor,(struct sockaddr *) &(sData.addru.addrin[0]),sizeof(sData.addru.addrin[0]))<0) {
-					perror("Cannot bind to interface: bind() error");
-			  		close(sData.descriptor);
-			  		exit(EXIT_FAILURE);
-				}
-			break;
-			default:
-				// Should never enter here
-				sData.descriptor=-1;
-			break;
-		}
-
-		// Only if -A was specified, set a certain EDCA AC (works only in patched kernels, as of now)
-		if(opts.macUP!=UINT8_MAX && setsockopt(sData.descriptor,SOL_SOCKET,SO_PRIORITY,&(opts.macUP),sizeof(opts.macUP))!=0) {
-			perror("setsockopt() for SO_PRIORITY error");
-			close(sData.descriptor);
+	if(opts.protocol!=AMQP_1_0) {
+		if(!socketDataSetup(opts.protocol,&sData,&opts,&addresses)) {
 			exit(EXIT_FAILURE);
 		}
+
+		// Print current interface name
+		fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",
+			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.devname : "(any)",
+			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.ifindex : 0);
+	}
+
+	do {
+		if(opts.protocol!=AMQP_1_0) {
+			if(!socketOpen(opts.protocol,&sData,&opts,&addresses)) {
+				exit(EXIT_FAILURE);
+			}
+		}	
+		#if AMQP_1_0_ENABLED
+		else if(opts.protocol==AMQP_1_0) {
+		// Creating a new QPID Proton proactor with a new connection/transport (pn_proactor_connect2())
+		aData.proactor=pn_proactor();
+		pn_proactor_addr(proactor_address_buff,sizeof(proactor_address_buff),opts.dest_addr_u.destAddrStr,opts.portStr);
+
+		pn_transport_t *t=pn_transport();
+
+		pn_proactor_connect2(aData.proactor,NULL,t,proactor_address_buff);
+
+		aData.message=pn_message();
+		}
+		#endif
 
 		// Set srand() for all the random elements inside the client and server
 		srand(time(NULL));
@@ -185,9 +115,10 @@ int main (int argc, char **argv) {
 		switch(opts.mode_cs) {
 			case CLIENT:
 			case LOOPBACK_CLIENT:
-				// Compute Rx timeout as: (MIN_TIMEOUT_VAL_C + 2000) ms if -t <= MIN_TIMEOUT_VAL_C ms or t + 2 s if -t > MIN_TIMEOUT_VAL_C ms
+				// Compute Rx timeout as: (MIN_TIMEOUT_VAL_C + opts.client_timeout) ms if -t <= MIN_TIMEOUT_VAL_C ms or (-t + opts.client_timeout) ms if 
+				//  -t > MIN_TIMEOUT_VAL_C ms
 				// Take into account that 'interval' is in 'ms' and 'tv_sec' is in 's'
-				rx_timeout.tv_sec=opts.interval<=MIN_TIMEOUT_VAL_C ? (MIN_TIMEOUT_VAL_C+2000)/1000 : (opts.interval+2000)/1000;
+				rx_timeout.tv_sec=opts.interval<=MIN_TIMEOUT_VAL_C ? (MIN_TIMEOUT_VAL_C+opts.client_timeout)/1000 : (opts.interval+opts.client_timeout)/1000;
 				rx_timeout.tv_usec=0;
 			break;
 			case SERVER:
@@ -205,38 +136,78 @@ int main (int argc, char **argv) {
 
 		/* Set Rx timeout, if the timeout cannot be set, issue a warning telling that, in case of packet loss,
 		the program may run indefintely */
-		if(setsockopt(sData.descriptor, SOL_SOCKET, SO_RCVTIMEO, &rx_timeout, sizeof(rx_timeout))!=0) {
-			fprintf(stderr,"Warning: could not set RCVTIMEO: in case certain packets are lost,\n"
-				"the program may run for an indefinite time and may need to be terminated with Ctrl+C.\n");
+		// The timeout is set with setsockopt() when using a normal socket, while it set with pn_proactor_set_timeout()
+		// (a Qpid Proton C library function) when using AMQP 1.0 (if enabled only)
+		if(opts.protocol==UDP) {
+			if(setsockopt(sData.descriptor, SOL_SOCKET, SO_RCVTIMEO, &rx_timeout, sizeof(rx_timeout))!=0) {
+				fprintf(stderr,"Warning: could not set RCVTIMEO: in case certain packets are lost,\n"
+					"the program may run for an indefinite time and may need to be terminated with Ctrl+C.\n");
+			}
+		}
+		#if AMQP_1_0_ENABLED
+		else if(opts.protocol==AMQP_1_0) {
+			aData.proactor_timeout=(pn_millis_t) (rx_timeout.tv_sec*1000+rx_timeout.tv_usec/1000);
+			pn_proactor_set_timeout(aData.proactor,aData.proactor_timeout);
+		}
+		#endif
+
+		// If -w was specified (i.e. if pts.udp_params.enabled is equal to 1), open the additional UDP socket
+		if(opts.udp_params.enabled && openReportSocket(&sock_w_data,&opts)<0) {
+			fprintf(stderr,"Warning: cannot open the socket for the the -w option. This option will be disabled.\n");
+			opts.udp_params.enabled=0;
+		}
+
+		// udp_w_data is passed to UDP clients/servers using the struct lampsock_data (sData)
+		if(opts.protocol==UDP) {
+			sData.sock_w_data=sock_w_data;
 		}
 
 		switch(opts.mode_cs) {
 			// Client is who sends packets
 			case CLIENT:
 			case LOOPBACK_CLIENT:
-				if(opts.mode_raw == RAW ? runUDPclient_raw(sData, srcmacaddr, srcIPaddr, &opts) : runUDPclient(sData, &opts)) {
-					close(sData.descriptor);
-					exit(EXIT_FAILURE);
+				if(opts.protocol==UDP) {
+					if(opts.mode_raw == RAW ? runUDPclient_raw(sData, addresses.srcmacaddr, addresses.srcIPaddr, &opts) : runUDPclient(sData, &opts)) {
+						if(!opts.dmode) {
+							close(sData.descriptor);
+							exit(EXIT_FAILURE);
+						}
+					}
 				}
+
+				#if AMQP_1_0_ENABLED
+				if(opts.protocol==AMQP_1_0) {
+					if(runAMQPproducer(aData,&opts,&sock_w_data)) {
+						if(!opts.dmode) {
+							close(sData.descriptor);
+							exit(EXIT_FAILURE);
+						}
+					}
+				}
+				#endif
 				break;
 			// Server is who replies to packets
 			case SERVER:
 			case LOOPBACK_SERVER:
-				if(opts.mode_raw == RAW ? runUDPserver_raw(sData, srcmacaddr, srcIPaddr, &opts) : runUDPserver(sData, &opts)) {
-					close(sData.descriptor);
-					exit(EXIT_FAILURE);
-				}
-
-				// Reset the rx timeout and errno value (as last operation) when in continuous daemon mode, before launching the next server session
-				if(opts.dmode) {
-					rx_timeout.tv_sec=86400;
-					rx_timeout.tv_usec=0;
-					// Set back a big timeout for the next session, if continuous mode is selected
-					if(setsockopt(sData.descriptor, SOL_SOCKET, SO_RCVTIMEO, &rx_timeout, sizeof(rx_timeout))!=0) {
-						fprintf(stderr,"Warning: could not set RCVTIMEO: in case certain packets are lost,\n"
-								"the program may run for an indefinite time and may need to be terminated with Ctrl+C.\n");
+				if(opts.protocol==UDP) {
+					if(opts.mode_raw == RAW ? runUDPserver_raw(sData, addresses.srcmacaddr, addresses.srcIPaddr, &opts) : runUDPserver(sData, &opts)) {
+						if(!opts.dmode) {
+							close(sData.descriptor);
+							exit(EXIT_FAILURE);
+						}
 					}
 				}
+
+				#if AMQP_1_0_ENABLED
+				if(opts.protocol==AMQP_1_0) {
+					if(runAMQPconsumer(aData,&opts,&sock_w_data)) {
+						if(!opts.dmode) {
+							close(sData.descriptor);
+							exit(EXIT_FAILURE);
+						}
+					}
+				}
+				#endif
 				break;
 			default:
 				// Should never reach this point; it can be reached only if the 'options' module allows, due to a bug,
@@ -246,11 +217,16 @@ int main (int argc, char **argv) {
 		}
 
 		close(sData.descriptor);
+
+		// If -w was specified (i.e. if pts.udp_params.enabled is equal to 1), close the additional UDP socket
+		if(opts.udp_params.enabled) {
+			closeReportSocket(&sock_w_data);
+		}
 	} while(opts.dmode && !end_prog_flag && (opts.mode_cs==SERVER || opts.mode_cs==LOOPBACK_SERVER));  // Continuosly run the server if the 'continuous daemon mode' is selected (a new socket will be created for each new session)
 
 	fprintf(stdout,"\nProgram terminated.\n");
 
-	if(srcmacaddr) freeMacAddrT(srcmacaddr);
+	if(addresses.srcmacaddr) freeMacAddrT(addresses.srcmacaddr);
 	options_free(&opts);
 
 	return 0;

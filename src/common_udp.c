@@ -14,6 +14,7 @@ Return values:
 0: ok
 -1: invalid argument
 -2: sendto() error: cannot send packet
+-3: read() error: cannot clear timer event
 */
 int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts, lamptype_t type, uint16_t followup_type, time_t interval_ms, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex) {
 	struct lamphdr lampHeader;
@@ -75,7 +76,7 @@ int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts
 				pthread_mutex_unlock(termination_flag_mutex);
 
 				if(sendto(args->sData.descriptor,&lampHeader,LAMP_HDR_SIZE(),NO_FLAGS,(struct sockaddr *)&(args->sData.addru.addrin[1]),sizeof(struct sockaddr_in))!=LAMP_HDR_SIZE()) {
-						return -2;
+					return -2;
 				}
 
 				// Successive attempts will have an increased sequence number
@@ -85,7 +86,9 @@ int controlSenderUDP(arg_struct_udp *args, uint16_t session_id, int max_attempts
 			poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
 			if(poll_retval>0) {
 				// "Clear the event" by performing a read() on a junk variable
-				read(clockFd,&junk,sizeof(junk));
+				if(read(clockFd,&junk,sizeof(junk))==-1) {
+					return -3;
+				}
 			}
 		}
 	}
@@ -99,6 +102,7 @@ Return values:
 -1: invalid argument
 -2: sendto() error: cannot send packet
 -3: malloc() error: cannot allocate memory
+-4: read() error: cannot clear timer event
 */
 int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t session_id, int max_attempts, lamptype_t type, uint16_t followup_type, time_t interval_ms, uint8_t *termination_flag, pthread_mutex_t *termination_flag_mutex) {
 	// Packet buffers and headers
@@ -207,6 +211,9 @@ int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t ses
 				pthread_mutex_unlock(termination_flag_mutex);
 
 				if(rawLampSend(args->sData.descriptor, args->sData.addru.addrll, inpacket_lamphdr, buffers.ethernetpacket, finalpktsize, FLG_NONE, UDP)) {
+					free(buffers.udppacket);
+					free(buffers.ippacket);
+					free(buffers.ethernetpacket);
 					return -2;
 				}
 
@@ -216,7 +223,12 @@ int controlSenderUDP_RAW(arg_struct *args, controlRCVdata *rcvData, uint16_t ses
 			poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
 			if(poll_retval>0) {
 				// "Clear the event" by performing a read() on a junk variable
-				read(clockFd,&junk,sizeof(junk));
+				if(read(clockFd,&junk,sizeof(junk))==-1) {
+					free(buffers.udppacket);
+					free(buffers.ippacket);
+					free(buffers.ethernetpacket);
+					return -4;
+				}
 			}
 		}
 	}

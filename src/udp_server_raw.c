@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <inttypes.h>
 #include <linux/errqueue.h>
+#include "carbon_thread_manager.h"
 #include "common_thread.h"
 #include "ipcsum_alth.h"
 #include "timer_man.h"
@@ -36,6 +37,10 @@ static modeub_t mode_session;
 static modefollowup_t followup_mode_session;
 static uint16_t client_port_session; // Stored in host byte order
 static uint8_t ack_report_received; // Global flag set by the ackListener thread: = 1 when an ACK has been received, otherwise it is = 0
+
+static carbonReportStructure carbonReportData;
+static int carbon_metrics_flush_first;
+static carbon_pthread_data_t ctd;
 
 // Thread ID for ackListener
 static pthread_t ackListener_tid;
@@ -283,7 +288,9 @@ static int transmitReport(struct lampsock_data sData, struct options *opts, stru
 		poll_retval=poll(&timerMon,1,INDEFINITE_BLOCK);
 		if(poll_retval>0) {
 			// "Clear the event" by performing a read() on a junk variable
-			read(clockFd,&junk,sizeof(junk));
+			if(read(clockFd,&junk,sizeof(junk))==-1) {
+				fprintf(stderr,"Failed to read a timer event when sending the report. The next attempts may fail.\n");
+			}
 		}
 	}
 
@@ -377,6 +384,26 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	controlRCVdata fuData;
 
+	// File descriptor for -W option (write per-packet data to CSV file)
+	int Wfiledescriptor=-1;
+
+	// Per-packet data structure (to be used when -W is selected)
+	// The followup_on_flag can be already set here, together with tripTimeProc,
+	// as there is no processing time estimation when working in unidirectional mode
+	// (i.e. when working on the only mode in which the server can actually use -W)
+	// Also the pointer to the report structure can be set here
+	perPackerDataStructure perPktData;
+	perPktData.followup_on_flag=0;
+	perPktData.tripTimeProc=0;
+	perPktData.enabled_extra_data=opts->report_extra_data;
+	perPktData.reportDataPointer=&reportData;
+
+	// timevalSub() return value (to check whether the result of a timeval subtraction is negative)
+	int timevalSub_retval=0;
+
+	// Flag managed internally by writeToReportSocket()
+	uint8_t first_call=1;
+
 	// Very important: initialize to 0 any flag that is used inside threads
 	ack_report_received=0;
 	followup_mode_session=FOLLOWUP_OFF;
@@ -402,7 +429,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	// Report structure inizialization
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode, opts->dup_detect_enabled);
 
 	// Populate the 'args' struct
 	args.sData=sData;
@@ -422,6 +449,24 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		CLEAR_ALL();
 		return 3;
 	}
+
+	// Initialize the carbon report structure (only if the mode is unidirectional, as this is the case
+	// in which the server manages the per-packet statistics)
+	if(mode_session==UNIDIR) {
+		// Initialize the Carbon report structure only if the -g option is used
+		if(opts->carbon_sock_params.enabled) {
+			if(openCarbonReportSocket(&carbonReportData,opts)<0) {
+				fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
+				CLEAR_ALL()
+				return 2;
+			}
+
+			carbonReportStructureInit(&carbonReportData,opts);
+
+			// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
+			carbon_metrics_flush_first=1;
+		}
+	}
 	
 	// -L is ignored if a bidirectional INIT packet was received (it's the client that should compute the latency, not the server)
 	if(mode_session!=UNIDIR && opts->latencyType!=USERTOUSER) {
@@ -431,7 +476,7 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		// Check if the KRT mode is supported by the current NIC and set the proper socket options
 		if (socketSetTimestamping(sData,SET_TIMESTAMPING_SW_RX)<0) {
 		 	perror("socketSetTimestamping() error");
-			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not suppoerted. Switching back to user-to-user latency.\n");
+			fprintf(stderr,"Warning: SO_TIMESTAMP is probably not supported. Switching back to user-to-user latency.\n");
 			opts->latencyType=USERTOUSER;
 		}
 
@@ -458,6 +503,14 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		mhdr.msg_flags=NO_FLAGS;
 	}
 
+	// Open CSV file when '-W' is specified (as this only applies to the unidirectional mode, no file is create when the mode is not unidirectional)
+	if(opts->Wfilename!=NULL && mode_session==UNIDIR) {
+		Wfiledescriptor=openTfile(opts->Wfilename,opts->overwrite_W,opts->followup_mode!=FOLLOWUP_OFF,opts->report_extra_data);
+		if(Wfiledescriptor<0) {
+			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
+		}
+	}
+
 	// Already get all the packet pointers
 	lampPacket=UDPgetpacketpointers(packet,&(headerptrs.etherHeader),&(headerptrs.ipHeader),&(headerptrs.udpHeader));
 	lampGetPacketPointers(lampPacket,&(headerptrs.lampHeader));
@@ -481,6 +534,11 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 		if(rcv_bytes==-1) {
 			if(errno==EAGAIN) {
 				fprintf(stderr,"Timeout reached when receiving packets. Connection terminated.\n");
+
+				if(mode_session==UNIDIR) {
+					reportSetTimeoutOccurred(&reportData);
+				}
+				
 				break;
 			} else {
 				fprintf(stderr,"Genetic recvfrom() error. errno = %d.\n",errno);
@@ -656,8 +714,10 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 					gettimeofday(&rx_timestamp,NULL);
 				}
 
-				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
-					fprintf(stderr,"Error: negative latency for packet from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+				timevalSub_retval=timevalSub(&tx_timestamp,&rx_timestamp);
+				if(timevalSub_retval) {
+					fprintf(stderr,"Error: negative latency (-%.3f ms - %s) for packet from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d)!\nThe clock synchronization is not sufficienty precise to allow unidirectional measurements.\n",
+						(double) (rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec)/1000,latencyTypePrinter(opts->latencyType),
 						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 					tripTime=0;
 				} else {
@@ -671,6 +731,37 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 				// Update the current report structure
 				reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
+
+				// When '-W' is specified, write the current measured value to the specified CSV file too (if a file was successfully opened)
+				if(Wfiledescriptor>0 || opts->udp_params.enabled) {
+					perPktData.seqNo=lamp_seq_rx;
+					perPktData.signedTripTime=timevalSub_retval==0 ? rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec : -(rx_timestamp.tv_sec*SEC_TO_MICROSEC+rx_timestamp.tv_usec);
+					perPktData.tx_timestamp=tx_timestamp;
+
+					if(Wfiledescriptor>0) {
+						writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+					}
+
+					if(opts->udp_params.enabled) {
+						writeToReportSocket(&(sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
+					}
+				}
+
+				// When -g is specified, update the Carbon/Graphite report structure
+				// If this is the first time this point is reached, also start the metrics flush thread
+				if(opts->carbon_sock_params.enabled) {
+					if(carbon_metrics_flush_first==1) {
+						carbon_metrics_flush_first=0;
+						if(startCarbonTimedThread(&ctd,&carbonReportData,opts)<0) {
+							t_rx_error=ERR_CARBON_THREAD;
+							break;
+						}
+					}
+
+					carbon_pthread_mutex_lock(ctd);
+					carbonReportStructureUpdate(&carbonReportData,tripTime,lamp_seq_rx,opts->dup_detect_enabled);
+					carbon_pthread_mutex_unlock(ctd);
+				}
 			break;
 
 			case PINGLIKE:
@@ -681,8 +772,11 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				// At the next received packet, the memory area pointed by 'packet' should be substituted by the newly received packet,
 				// thus allowing in some way this mechanism of directly replacing bytes inside the received data.
 
-				fprintf(stdout,"Received a ping-like message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Replying to client...\n",
-					MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+				// Print here that a packet was received as default behaviour
+				if(!opts->printAfter) {
+					fprintf(stdout,"Received a ping-like message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Replying to client...\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
+				}
 
 				// Edit some 'packet' fields
 				// memcpy the MAC addresses
@@ -718,6 +812,12 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 				// rawLampSend should also take care of re-computing the checksum, which is changed due to the different fields in the reply packet.
 				if(rawLampSend(sData.descriptor, sData.addru.addrll, headerptrs.lampHeader, packet, rcv_bytes, FLG_NONE, UDP)) {
 					fprintf(stderr,"UDP server reported that it can't reply to the client with id=%u and seq=%u\n",lamp_id_rx,lamp_seq_rx);
+				}
+
+				// Print here that a packet was received if -1 was specified
+				if(opts->printAfter) {
+					fprintf(stdout,"Received a ping-like message from " PRI_MAC " (id=%u, seq=%u, rx_bytes=%d). Reply sent to client...\n",
+						MAC_PRINTER(srcmacaddr_pkt),lamp_id_rx,lamp_seq_rx,(int)rcv_bytes);
 				}
 
 				// If in hardware timestamping or software (kernel) follow-up mode, gather the tx_timestamp from ancillary data
@@ -773,6 +873,17 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	if(mode_session==UNIDIR) {
+		// Terminate the carbon flush thread
+		// carbon_metrics_flush_first is checked in order to verify if the thread has been created or not
+		// If the thread has been created, the carbon_metrics_flush_first flag should have been set to 0
+		if(opts->carbon_sock_params.enabled && carbon_metrics_flush_first==0) {
+			stopCarbonTimedThread(&ctd);
+		}
+
+		if(Wfiledescriptor>0) {
+			closeTfile(Wfiledescriptor);
+		}
+
 		destIP_inaddr.s_addr=headerptrs.ipHeader->saddr;
 		// If the mode is the unidirectional one, get the destination IP/MAC from the last packet
 		// Use as destination IP (destIP), the source IP of the last received packet (headerptrs.ipHeader->saddr)
@@ -782,7 +893,23 @@ unsigned int runUDPserver_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 			CLEAR_ALL();
 			return 4;
 		}
+
+		if(opts->udp_params.enabled) {
+			// If '-w' was specified and the mode is undirectional, send a LateEND empty packet to make the 
+			// receiving application stop reading the data; this empty packet is triggered by setting the 
+			// second argument (report) to NULL
+			printStatsSocket(opts,NULL,&(sData.sock_w_data),lamp_id_session);
+		}
+
+		if(opts->carbon_sock_params.enabled) {
+			// If '-g' was specified and the mode is unidirectional, close the previously opened socket
+			// for flushing metrics to Carbon
+			carbonReportStructureFree(&carbonReportData,opts);
+			closeCarbonReportSocket(&carbonReportData);
+		}
 	}
+
+	reportStructureFree(&reportData);
 
 	// Destroy mutex (as it is no longer needed) and clear all the other data that should be clared (see the CLEAR_ALL() macro)
 	CLEAR_ALL();

@@ -1,3 +1,4 @@
+#include "common_socket_man.h"
 #include "report_manager.h"
 #include <limits.h>
 #include <inttypes.h>
@@ -7,6 +8,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <math.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <linux/if.h>
 
 // Condidence interval array sizes
 #define TSTUDSIZE90 125
@@ -19,6 +23,63 @@
 #define TSTUDSIZE99THRS 22
 
 #define TSTUDTHRS_INCR 0.001
+
+// Macros for extra fields printing in writeToTFile() and writeToUDPSocket()
+#define compute_reconstructedSeqNo(perPktData) perPktData->reportDataPointer!=NULL ? \
+			perPktData->reportDataPointer->_lastReconstructedSeqNo : \
+			-1
+
+#define compute_perTillNow(perPktData) perPktData->reportDataPointer!=NULL ? \
+	((double)(perPktData->reportDataPointer->lossCount))/((double)perPktData->reportDataPointer->seqNumberResets*UINT16_TOP+perPktData->reportDataPointer->lastMaxSeqNumber+1-INITIAL_SEQ_NO) : \
+	-1
+
+#define compute_minLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)(perPktData->reportDataPointer->minLatency)/1000 : -1
+
+#define compute_maxLatency(perPktData) perPktData->reportDataPointer!=NULL ? (double)perPktData->reportDataPointer->maxLatency/1000 : -1
+
+
+static inline double computeLostPktPerc(reportStructure *report) {
+	double lostPktPerc;
+
+	// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
+	// If no reportStructureUpdate() was ever called (i.e. minLatency is still UINT64_MAX), set the lost packets percentage to 100%
+	if(report->minLatency!=UINT64_MAX) {
+		lostPktPerc=report->totalPackets>=report->packetCount ? ((double) ((report->totalPackets-report->packetCount)))*100/(report->totalPackets) : ((double) ((report->packetCount-report->totalPackets)))*-100/(report->packetCount);
+	} else {
+		lostPktPerc=100;
+	}
+
+	return lostPktPerc;
+}
+
+static inline double computeLostPktPercLastSeqNo(reportStructure *report) {
+	double lostPktPercLastSeqNo;
+
+	// This function works almost as computeLostPktPerc(), but it computes the lost packet percentage up to the last received sequence number
+	if(report->minLatency!=UINT64_MAX) {
+		lostPktPercLastSeqNo=((double)(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1);
+	} else {
+		lostPktPercLastSeqNo=100;
+	}
+
+	return lostPktPercLastSeqNo;
+}
+
+static inline char *getProtocolName(protocol_t protocol) {
+	switch(protocol) {
+		case UDP:		
+			return "UDP";
+		break;
+		#if AMQP_1_0_ENABLED
+		case AMQP_1_0:
+			return "AMQP 1.0";
+		break;
+		#endif
+		default:
+			return "Unknown";
+		break;
+	}
+}
 
 // Static function to compute ts, to be used to compute the confidence intervals
 /* 	It tries to emulate functions such as MATLAB's tinv(), but without inverting the Student's T cumulative distribution,
@@ -94,12 +155,12 @@ static double tsCalculator(int dof, int intervalIndex) {
 }
 
 static inline struct tm *getLocalTime(void) {
-	time_t currtime = time(NULL);
+	time_t currtime=time(NULL);
 
 	return localtime(&currtime);
 }
 
-void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode) {
+void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uint64_t totalPackets, latencytypes_t latencyType, modefollowup_t followupMode, uint8_t dup_detect_enabled) {
 	report->averageLatency=0.0;
 	report->minLatency=UINT64_MAX;
 	report->maxLatency=0;
@@ -111,64 +172,148 @@ void reportStructureInit(reportStructure *report, uint16_t initialSeqNumber, uin
 	report->packetCount=0;
 	report->totalPackets=totalPackets;
 	report->errorsCount=0;
+	report->lossCount=0;
 
 	report->variance=0;
 
 	// Internal members
 	report->_isFirstUpdate=1;
 
-	// Initialize also the lastSeqNumber, just to be safe against bugs in the following code, which should set, in any case, _lastSeqNumber
-	report->_lastSeqNumber=0;
+	report->lastMaxSeqNumber=INITIAL_SEQ_NO-1;
+
+	report->seqNumberResets=0;
+
+	report->_timeoutOccurred=0;
 
 	report->_welfordM2=0;
+
+	report->_lastReconstructedSeqNo=-1;
 
 	for(int i=0;i<CONFINT_NUMBER;i++) {
 		report->confidenceIntervalDev[i]=-1.0;
 	}
+
+	report->dupCount=0;
+	if(dup_detect_enabled) {
+		// Initialize a dupStoreList data structure for detecting sequence numbers
+		// Its size is equal to the minimum number of previously received sequence numbers which should be taken
+		// into account when detecting duplicated packets
+		report->dupCountList=dupSL_init(SEQUENCE_NUMBERS_RESET_THRESHOLD);
+		report->dupCountEnabled=1;
+	} else {
+		report->dupCountEnabled=0;
+	}
 }
 
 void reportStructureUpdate(reportStructure *report, uint64_t tripTime, uint16_t seqNumber) {
-	report->packetCount++;
+	uint8_t seqNumberResetOccurred=0;
 
-	if(tripTime!=0) {
-		// Set _lastSeqNumber on first update
-		if(report->_isFirstUpdate==1) {
-			report->_lastSeqNumber = seqNumber==0 ? UINT16_MAX : seqNumber-1;
-			report->_isFirstUpdate=0;
-		}
+	// Compute the gap between the currently received sequence number and the last maximum sequence number received so far
+	int32_t gap=(int32_t)seqNumber-(int32_t)report->lastMaxSeqNumber;
 
-		report->_welfordAverageLatencyOld=report->averageLatency;
-		report->averageLatency+=(tripTime-report->averageLatency)/report->packetCount;
-
-		if(tripTime<report->minLatency) {
-			report->minLatency=tripTime;
-		}
-
-		if(tripTime>report->maxLatency) {
-			report->maxLatency=tripTime;
-		}
-
-		// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets.
-		// The out of order count is related here to the number of times a decreasing sequence number is detected.
-		// When the last sequence number is 65535 (UINT16_MAX), due to cyclic numbers, the expected current one is 0
-		// This should not be detected as an error, as it is the only situation in which a decreasing sequence number is expected
-		if(report->_lastSeqNumber==UINT16_MAX ? seqNumber!=0 : seqNumber<=report->_lastSeqNumber) {
-			report->outOfOrderCount++;
-		}
-
-		// Set last sequence number
-		report->_lastSeqNumber=seqNumber;
-
-		// Compute the current variance (std dev squared) value using Welford's online algorithm
-		report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
-		if(report->packetCount>1) {
-			report->variance=report->_welfordM2/(report->packetCount-1);
-		}
-	} else {
-		// If tripTime is zero, a timestamping error occurred: count the current packet as a packet containing an error
-		// This packet will be counter as received, but it will not be used to compute the final statistics
-		report->errorsCount++;
+	// Try to detect a cyclical sequence number reset if there is a big negative gap (i.e. if something like ...->65533->65534->0->2->... happens)
+	if(report->lastMaxSeqNumber!=-1 && gap<-SEQUENCE_NUMBERS_RESET_THRESHOLD) {
+		report->seqNumberResets++;
+		seqNumberResetOccurred=1;
 	}
+	
+	// Reconstruct the current sequence number to obtain its value as if numbers were not cyclical
+	// Example: cyclical = 65535->0->1   -   reconstructed = 65535->65536->65537
+	// If no cyclical sequence number resets occurred so far, just set _lastReconstructedSeqNo to the current sequence number
+	// Take into account also the case in which out of order packets are received after a reset
+	// Example: 65535->0->65534->1 ...  -  we should not sum '65536' to '65534'
+	// The detection of out of order packets after a reset is performed by detecting a large positive gap between the current
+	// packet and the last received (cyclical) maximum sequence number
+	report->_lastReconstructedSeqNo = report->seqNumberResets == 0 ?
+		seqNumber :
+		(report->seqNumberResets-(gap>=SEQUENCE_NUMBERS_RESET_THRESHOLD))*UINT16_TOP+seqNumber;
+
+	// Check for duplicates, saving the current sequence number into a "dupStoreList" (a sort of optimized list for storing
+	// already received sequence numbers). If the sequence number has been never received before, DSL_NOTFOUND is returned by
+	// dupSL_insertandcheck() and the number is stored. If instead it has been received before, dupSL_insertandcheck() will
+	// return DSL_FOUND to signal a duplicated packet
+	if(report->dupCountEnabled && dupSL_insertandcheck(report->dupCountList,report->_lastReconstructedSeqNo)==DSL_FOUND) {
+		report->dupCount++;
+	} else {
+		report->packetCount++;
+
+		if(tripTime!=0) {
+			report->_welfordAverageLatencyOld=report->averageLatency;
+			report->averageLatency+=(tripTime-report->averageLatency)/report->packetCount;
+
+			if(tripTime<report->minLatency) {
+				report->minLatency=tripTime;
+			}
+
+			if(tripTime>report->maxLatency) {
+				report->maxLatency=tripTime;
+			}
+
+			// An out of order packet is detected if any decreasing sequence number trend is detected in the sequence of packets,
+			// with respect to the maximum sequence number received so far
+			// It should not be detected if a normal cyclical reset of sequence numbers has occurred
+			// A packet is also considered out of order when a very big positive gap is detected, which should provide more
+			// robustness when trying to detect out of order packets just after a cyclical reset occurred
+			// For example in: 65535->0->1->65534->2->3 '65534' should be detected as out of order, even if there is not actually
+			// a decreasing trend between '1' and '65534'
+			if(seqNumberResetOccurred==0 && (seqNumber<=report->lastMaxSeqNumber || gap>=SEQUENCE_NUMBERS_RESET_THRESHOLD)) {
+				report->outOfOrderCount++;
+
+				if(seqNumber!=report->lastMaxSeqNumber && report->lossCount>0) {
+					report->lossCount--;
+				}
+			}
+
+			// Update the packet loss count if a loss occurred (used, for the time being, only for the PER-till-now computation 
+			// when -W is selected)
+			// Manage also the case in which a sequence number reset just occurred (in this case, we must compare the
+			// 'reconstructed' version of seqNumber with the last maximum received number - taking into account that also
+			// lastMaxSeqNumber is cyclically reset, in such a way that it is sufficient to add UINT16_TOP, without taking
+			// into account how many resets occurred so far)
+			// Example: 65535->1 - to detect the loss of '0', we should compare '1+65536 (=65537)' with '65535', not '1'
+			if(((seqNumberResetOccurred==1 && seqNumber+UINT16_TOP>report->lastMaxSeqNumber+1) ||
+				(seqNumberResetOccurred==0 && seqNumber>report->lastMaxSeqNumber+1)) && 
+				gap<SEQUENCE_NUMBERS_RESET_THRESHOLD) {
+
+				report->lossCount+=seqNumber-1-report->lastMaxSeqNumber;
+
+				// Negative loss correction (i.e. if a sequence number reset just occurred, we must consider, as said before,
+				// seqNumber+UINT16_TOP, thus summing UINT16_TOP to the previous report->lossCount computation)
+				if(seqNumberResetOccurred==1) {
+					report->lossCount+=UINT16_TOP;
+				}
+			}
+
+			// Compute the maximum received sequence number so far (as "last sequence number")
+			// When a cyclical number reset is detected, the new maximum so far should be the current sequence number, even if,
+			// strictly speaking, it is smaller than the last maximum
+			// In this way, it is possible to consider a cyclically resetting lastMaxSeqNumber
+			// A new maximum is not detected if gap>=SEQUENCE_NUMBERS_RESET_THRESHOLD (i.e. with a very large positive gap), as the
+			// current packet is considered, in this case, as out of order.
+			if(report->lastMaxSeqNumber!=-1 && (seqNumberResetOccurred==1 || (seqNumber>report->lastMaxSeqNumber && gap<SEQUENCE_NUMBERS_RESET_THRESHOLD))) {
+				report->lastMaxSeqNumber=seqNumber;
+			}
+
+			// Set, at the beginning, the maximum sequence number so far to seqNumber
+			if(report->lastMaxSeqNumber==-1) {
+				report->lastMaxSeqNumber=seqNumber;
+			}
+
+			// Compute the current variance (std dev squared) value using Welford's online algorithm
+			report->_welfordM2=report->_welfordM2+(tripTime-report->_welfordAverageLatencyOld)*(tripTime-report->averageLatency);
+			if(report->packetCount>1) {
+				report->variance=report->_welfordM2/(report->packetCount-1);
+			}
+		} else {
+			// If tripTime is zero, a timestamping error occurred: count the current packet as a packet containing an error
+			// This packet will be counter as received, but it will not be used to compute the final statistics
+			report->errorsCount++;
+		}
+	}
+}
+
+void reportSetTimeoutOccurred(reportStructure *report) {
+	report->_timeoutOccurred=1;
 }
 
 void reportStructureFinalize(reportStructure *report) {
@@ -181,6 +326,16 @@ void reportStructureFinalize(reportStructure *report) {
 	for(int i=0;i<CONFINT_NUMBER;i++) {
 		report->confidenceIntervalDev[i]=tsCalculator(report->packetCount-1,i)*stderr;
 	}
+}
+
+void reportStructureFree(reportStructure *report) {
+	if(report->dupCountEnabled) {
+		dupSL_free(report->dupCountList);
+	}
+}
+
+void reportStructureChangeTotalPackets(reportStructure *report, uint64_t totalPackets) {
+	report->totalPackets=totalPackets;
 }
 
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask) {
@@ -201,11 +356,6 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 			report->totalPackets,
 			report->errorsCount);
 	} else {
-		if(report->packetCount>report->totalPackets) {
-			fprintf(stream,"There's something wrong: the client received more packets than the total number set with -n.\n");
-			fprintf(stream,"A negative percentage packet loss may occur.\n");
-		}
-
 		// Latency/RTT is computed over all the correctly received packets, excluding all the packets which caused timestamping errors (counted by report->errorsCount)
 		fprintf(stream,"Latency over %" PRIu64 " packets:\n"
 			"(%s)%s Minimum: %.3f ms - Maximum: %.3f ms - Average: %.3f ms\n"
@@ -228,14 +378,13 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 			}
 		}
 
-		// Negative percentages (should never enter here)
+		// Negative percentages (should never enter here if we are detecting duplicates, i.e. if -D is not specified)
 		if(report->packetCount>report->totalPackets) {
 			fprintf(stream,"Lost packets: -%.2f%% [-%" PRIi64 "/%" PRIi64 "]\n",
 				((double)(report->packetCount-report->totalPackets))*100/(report->totalPackets),
 				report->packetCount-report->totalPackets,
 				report->totalPackets);
 		} else {
-			// Positive percentages (should always enter here)
 			fprintf(stream,"Lost packets: %.2f%% [%" PRIi64 "/%" PRIi64 "]\n",
 				((double)(report->totalPackets-report->packetCount))*100/(report->totalPackets),
 				report->totalPackets-report->packetCount,
@@ -247,11 +396,32 @@ void printStats(reportStructure *report, FILE *stream, uint8_t confidenceInterva
 
 		fprintf(stream, "Out of order count (approx. as the number of times a decreasing seq. number is detected): %" PRIu64 "\n",
 			report->outOfOrderCount);
-	}
 
-	if(report->totalPackets>UINT16_MAX) {
-		fprintf(stream,"Note: the number of packets is very large. Since it causes the sequence numbers to cyclically reset,\n"
-			"\t the out of order count may be inaccurate, in the order of +- <number of resets that occurred>.\n");
+		fprintf(stream,"Est. number of cyclical sequence number resets: %" PRIu64 "\n",
+			report->seqNumberResets);
+
+		if(report->dupCountEnabled) {
+			fprintf(stream,"Number of duplicated packets: %" PRIu64 "\n",
+				report->dupCount);
+		}
+
+		// If a timeout occurred, print that a timeout occurred and print also the packet loss up to that sequence number.
+		// The real last (highest so far) sequence number (as if LaMP sequence numbers were not cyclical) is estimated using report->seqNumberResets, with:
+		// (report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber-report->packetCount+1).
+		if(report->_timeoutOccurred==1) {
+			fprintf(stream,"Timeout occurred: highest sequence number: %" PRIu16 " (non-cyclical: %" PRIu64 ")\nEst. packet loss up to highest sequence number: %.2f%% [%" PRIi64 "/%" PRIi64 "]\n",
+				report->lastMaxSeqNumber,
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,
+				((double)(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1-report->packetCount)*100/((report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1),
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber-report->packetCount+1,
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber+1);
+		}
+
+		if(!report->dupCountEnabled && report->packetCount>report->totalPackets) {
+			fprintf(stream,"There's something wrong: the client received more packets than the total number set with -n.\n");
+			fprintf(stream,"A negative percentage packet loss may occur.\n");
+			fprintf(stream,"Use -D to enable duplicate packet detection.\n");
+		}
 	}
 }
 
@@ -261,6 +431,7 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	int fileAlreadyExists=0;
 	struct tm *currdate;
 	double lostPktPerc=0;
+	double lostPktPercLastSeqNo=0;
 
 	if(opts->overwrite) {
 		csvfp=open(filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
@@ -285,16 +456,45 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 
 		if(opts->overwrite || !fileAlreadyExists) {
 			// Recreate CSV first line
-			dprintf(csvfp,"Date,Time,ClientMode,SocketType,Protocol,UP,PayloadLen-B,TotReqPackets,Interval-s,LatencyType,FollowUp,MinLatency-ms,MaxLatency-ms,AvgLatency-ms,LostPackets-Perc,ErrorsCount,OutOfOrderCountDecr,StDev-ms,ConfInt90-,ConfInt90+,ConfInt95-,ConfInt95+,ConfInt99-,ConfInt99+\n");
+			dprintf(csvfp,"Date,"
+				"Time,"
+				"ClientMode,"
+				"SocketType,"
+				"Protocol,"
+				"UP,"
+				"PayloadLen-B,"
+				"TotReqPackets,"
+				"TestDuration-s,"
+				"Interval-ms,"
+				"Interval-type,"
+				"Interval-Distrib-Param,"
+				"Interval-Distrib-Batch-Size,"
+				"LatencyType,"
+				"FollowUp,"
+				"MinLatency-ms,"
+				"MaxLatency-ms,"
+				"AvgLatency-ms,"
+				"LostPackets-Perc,"
+				"ErrorsCount,"
+				"OutOfOrderCountDecr,"
+				"StDev-ms,"
+				"SeqNumberResets,"
+				"TimeoutOccurred,"
+				"HighestSeqNumber,"
+				"HighestSeqNumber-reconstructed-noncyclical,"
+				"LostPacketHighestSeq-Perc,"
+				"reportingSuccessful,"
+				"ConfInt90l,"
+				"ConfInt90u,"
+				"ConfInt95l,"
+				"ConfInt95u,"
+				"ConfInt99l,"
+				"ConfInt99u\n");
 		}
 
-		// Set lostPktPerc depending on the sign of report->totalPackets-report->packetCount (the negative sign should never occur in normal program operations)
-		// If no reportStructureUpdate() was ever called (i.e. minLatency is still UINT64_MAX), set the lost packets percentage to 100%
-		if(report->minLatency!=UINT64_MAX) {
-			lostPktPerc=report->totalPackets>=report->packetCount ? ((double) ((report->totalPackets-report->packetCount)))*100/(report->totalPackets) : ((double) ((report->packetCount-report->totalPackets)))*-100/(report->packetCount);
-		} else {
-			lostPktPerc=100;
-		}
+		lostPktPerc=computeLostPktPerc(report);
+
+		lostPktPercLastSeqNo=computeLostPktPercLastSeqNo(report);
 
 		/* Save report data to file, in CSV style */
 		// Save date and time
@@ -303,21 +503,18 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 		// Save current mode (unidirectional or pinglike) and socket type
 		dprintf(csvfp,"%s,%s,",opts->mode_ub==UNIDIR ? "Unidirectional" : "Pinglike",opts->mode_raw==RAW ? "Raw" : "Non raw");
 
-		// Save current protocol (even if UDP only is supported as of now, it can be convenient to write a switch-case statement, to allow an easier future extensibility of the code with other protocols)
-		switch(opts->protocol) {
-			case UDP:		
-				dprintf(csvfp,"UDP,");
-			break;
-			default:
-				dprintf(csvfp,"Unknown,");
-			break;
-		}
+		// Save current protocol
+		dprintf(csvfp,"%s,",getProtocolName(opts->protocol));
 		
 		// Save report data
 		dprintf(csvfp,"%d," 		// macUP
 			"%" PRIu16 ","			// payloadLen
 			"%" PRIu64 ","			// total number of packets requested
-			"%.3f,"					// interval between packets (in s)
+			"%" PRIu32 ","			// total test duration (-i, in s)
+			"%.3f,"					// interval between packets (in ms)
+			"%s,"					// (random) interval type
+			"%lf,"					// random interval param (if available, if not, it is equal to -1)
+			"%" PRIu64 ","			// random interval batch size (if available, if not using random intervals, it is forced to be always = total number of packets)
 			"%s,"					// latency type (-L)
 			"%s,"					// follow-up (-F)
 			"%.3f,"					// minLatency
@@ -326,11 +523,21 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			"%.2f,"					// lost packets (perc)
 			"%" PRIu64 ","			// errors count
 			"%" PRIu64 ","			// out-of-order count
-			"%.4f,",				// standard deviation
+			"%.4f,"					// standard deviation
+			"%" PRIu64 ","			// est. number of sequence number resets
+			"%d,"					// timeout occurred (0 = no, 1 = yes)
+			"%" PRIu16 ","			// last sequence number
+			"%" PRIu64 ","			// last sequence number (non cyclical, reconstructed)
+			"%.2f,"					// lost packets up to last sequence number (perc)
+			"%d,",					// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
 			opts->macUP==UINT8_MAX ? 0 : opts->macUP,																				// macUP (UNSET is interpreted as '0', as AC_BE seems to be used when it is not explicitly defined)
 			opts->payloadlen,																										// out-of-order count (# of decreasing sequence breaks)
-			opts->number,																											// total number of packets requested
-			((double) opts->interval)/1000,																							// interval between packets (in s)
+			opts->duration_interval == 0 ? opts->number : 0,																		// total number of packets requested
+			opts->duration_interval,																								// total test duration (-i, in s)
+			(double) opts->interval,																								// interval between packets (in ms)
+			opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type),						// (random) interval type
+			opts->rand_param,																										// random interval param (if available, if not, it is equal to -1)
+			opts->rand_type==NON_RAND ? report->totalPackets : opts->rand_batch_size,																							// random interval batch size (if available, if not using random intervals, it is forced to be always = total number of packets)
 			latencyTypePrinter(report->latencyType),																				// latency type (-L)
 			report->followupMode!=FOLLOWUP_OFF ? "On" : "Off",																		// follow-up (-F)					
 			report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,												// minLatency
@@ -339,26 +546,43 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 			lostPktPerc,																											// lost packets (perc)
 			report->errorsCount,																									// errors count
 			report->outOfOrderCount,																								// Out-of-order count
-			sqrt(report->variance)/1000);																							// standard deviation (sqrt of variance)
+			sqrt(report->variance)/1000,																							// standard deviation (sqrt of variance)
+			report->seqNumberResets,																								// est. number of sequence number resets
+			report->_timeoutOccurred,																								// timeout occurred (0 = no, 1 = yes)
+			report->lastMaxSeqNumber,																								// last sequence number
+			(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,															// last sequence number (non cyclical, reconstructed)
+			lostPktPercLastSeqNo,																									// lost packets up to last sequence number (perc)																						
+			report->minLatency!=UINT64_MAX);																						// reportingSuccessful (= 1 if everything is ok, = 0 if a reporting error occurred)
+		
+		// Save confidence intervals data (if a confidence interval is negative, limit it to 0, as real latency cannot be negative)
+		// Do this only if there is actually data in the report (i.e. if at least one packet has been received - if no packets have
+		// been received or if no report was received back in unidirectional mode, report->minLatency is expected to be still equal
+		// to its initialized value (i.e. UINT64_MAX)
+		if(report->minLatency!=UINT64_MAX) {
+			for(int i=0;i<CONFINT_NUMBER;i++) {
+				dprintf(csvfp,
+					"%.3f,"
+					"%.3f",
+					report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+					(report->averageLatency+report->confidenceIntervalDev[i])/1000);
 
-		// Save confidence intervals data
-		for(int i=0;i<CONFINT_NUMBER;i++) {
-			dprintf(csvfp,
-				"%.3f,"
-				"%.3f",
-				report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
-				(report->averageLatency+report->confidenceIntervalDev[i])/1000);
-
-			if(i<CONFINT_NUMBER-1) {
-				dprintf(csvfp,",");
-			} else {
-				dprintf(csvfp,"\n");
+				if(i<CONFINT_NUMBER-1) {
+					dprintf(csvfp,",");
+				} else {
+					dprintf(csvfp,"\n");
+				}
 			}
+		} else {
+			dprintf(csvfp,"-1,-1,-1,-1,-1,-1\n");
 		}
 
 		close(csvfp);
 
-		fprintf(stdout,"Report data was saved inside %s\n",opts->filename);
+		if(report->minLatency!=UINT64_MAX) {
+			fprintf(stdout,"Report data was saved inside %s\n",opts->filename);
+		} else {
+			fprintf(stdout,"Empty report data (test failed) was saved inside %s\n",opts->filename);
+		}
 	} else {
 		printOpErrStatus=1;
 	}
@@ -366,46 +590,436 @@ int printStatsCSV(struct options *opts, reportStructure *report, const char *fil
 	return printOpErrStatus;
 }
 
-int openTfile(const char *Tfilename,int followup_on_flag) {
+// If this function is called with report==NULL, an empty LaTeEND packet will be sent, formatting its content as:
+// 'LaTeEND,<LaMP ID>,srvtermination'
+int printStatsSocket(struct options *opts, reportStructure *report, report_sock_data_t *sock_data,uint16_t test_id) {
+	char sockbuff_tcp[MAX_w_TCP_SOCK_BUF_SIZE];
+	int str_char_count=0;
+
+	struct timespec curr_ts;
+	long curr_ts_ms;
+
+	const int confidenceIntervals[CONFINT_NUMBER]={90,95,99};
+
+	if(report==NULL) {
+		snprintf(sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE,"LaTeEND,%" PRIu16 ",srvtermination",test_id);
+	} else {
+		// Get the current time (in s and ns from the epoch, i.e. since 00:00:00 UTC, January 1st 1970)
+		if(clock_gettime(CLOCK_REALTIME,&curr_ts)==-1) {
+			// In case of error, send a null timestamp
+			curr_ts_ms=0;
+		} else {
+			curr_ts_ms=curr_ts.tv_sec+round(curr_ts.tv_nsec/1.0e6);
+		}
+
+		str_char_count=snprintf(sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE,"LaTeEND,%" PRIu16 ","
+				"timestamp=%ld,"
+				"protocol=%s,"
+				"clientmode=%s,"
+				"UP=%d,"
+				"payloadlen=%" PRIu16 ","
+				"totpackets=%" PRIu64 ","
+				"testduration_s=%" PRIu32 ","
+				"interval_ms=%.3f,"
+				"interval_type=%s,"
+				"int_distr_param=%lf,"
+				"int_distr_batch=%" PRIu64 ","
+				"latencytype=%s,"
+				"followup=%d,"
+				"min_ms=%.3f,"
+				"max_ms=%.3f,"
+				"avg_ms=%.3f,"
+				"lostpkts_perc=%.2f,"
+				"errors=%" PRIu64 ","
+				"outoforder=%" PRIu64 ","
+				"stdev=%.4f,"
+				"timeout=%d,"
+				"highestseqno=%" PRIu64 ","
+				"losttolast=%.2f,"
+				"reportok=%d",
+				test_id,																								// (LaMP ID after "LaTeEND,")
+				curr_ts_ms,																								// timestamp
+				getProtocolName(opts->protocol),																		// protocol
+				opts->mode_ub==UNIDIR ? "unidirectional" : "pinglike",													// clientmode
+				opts->macUP==UINT8_MAX ? 0 : opts->macUP,																// UP
+				opts->payloadlen,																						// payloadlen
+				opts->duration_interval == 0 ? opts->number : 0,														// totpackets
+				opts->duration_interval,																				// testduration_s
+				(double) opts->interval,																				// interval_ms
+				opts->rand_type==NON_RAND ? "fixed_periodic" : enum_to_str_rand_distribution_t(opts->rand_type),		// interval_type
+				opts->rand_param,																						// int_distr_param
+				opts->rand_type==NON_RAND ? report->totalPackets : opts->rand_batch_size,								// int_distr_batch
+				latencyTypePrinter(report->latencyType),																// latencytype
+				report->followupMode,																					// followup (full follow-up mode enum value, =0 if off, >0 if on)
+				report->minLatency==UINT64_MAX ? 0 : ((double) report->minLatency)/1000,								// min_ms
+				((double) report->maxLatency)/1000,																		// max_ms
+				report->minLatency==UINT64_MAX ? 0 : report->averageLatency/1000,										// avg_ms
+				computeLostPktPerc(report),																				// lostpkt_perc
+				report->errorsCount,																					// errors
+				report->outOfOrderCount,																				// outoforder
+				sqrt(report->variance)/1000,																			// stdev
+				report->_timeoutOccurred,																				// timeout
+				(report->seqNumberResets*UINT16_TOP)+report->lastMaxSeqNumber,											// highestseqno (reconstructed, non cyclical)
+				computeLostPktPercLastSeqNo(report),																	// losttolast
+				report->minLatency!=UINT64_MAX																			// reportok
+				);
+
+			// Send only the confidence intervals which were requested trough -C
+			for(int i=0;i<CONFINT_NUMBER;i++) {
+				if(opts->confidenceIntervalMask & (1<<i)) {
+					str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",confint%dm=%.3f,confint%dp=%.3f",
+						confidenceIntervals[i],
+						report->averageLatency-report->confidenceIntervalDev[i]<0?0:(report->averageLatency-report->confidenceIntervalDev[i])/1000,
+						confidenceIntervals[i],
+						(report->averageLatency+report->confidenceIntervalDev[i])/1000);
+				}
+			}
+		}
+
+		// Send the final test data over the TCP socket
+		if(send(sock_data->descriptor_tcp,sockbuff_tcp,strlen(sockbuff_tcp),0)!=strlen(sockbuff_tcp)) {
+			fprintf(stderr,"%s() error: cannot send the final test data via the specified TCP socket (-w).\n",__func__);
+			perror("TCP socket error:");
+			return 1;
+		}
+
+	return 0;
+}
+
+int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data) {
 	int csvfd;
+	char *Tfilename_fileno;
+
 	errno=0;
 
 	if(Tfilename==NULL) {
 		return -2;
 	}
 
-	csvfd=open(Tfilename, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+	if(overwrite) {
+		csvfd=open(Tfilename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
+	} else {
+		csvfd=open(Tfilename, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+	}
 
 	if(csvfd<0) {
 		if(errno==EEXIST) {
-			csvfd=open(Tfilename, O_WRONLY | O_APPEND);
+			// File already exists
+			// When overwrite==1 we never expect to reach this point
+			// Try to create a new file, appending an increasing number after <Tfilename>, until W_MAX_FILE_NUMBER attemps are reached
+			int fileno=1;
+			int fileopendone=0;
+
+			Tfilename_fileno=malloc((strlen(Tfilename)+W_MAX_FILE_NUMBER_DIGITS+1)*sizeof(char));
+
+			if(!Tfilename_fileno) {
+				return -3;
+			}
+
+			while(fileno<=W_MAX_FILE_NUMBER && fileopendone==0) {
+				snprintf(Tfilename_fileno,strlen(Tfilename)+W_MAX_FILE_NUMBER_DIGITS+2,"%.*s_%0*d.csv",(int) (strlen(Tfilename)-4),Tfilename,W_MAX_FILE_NUMBER_DIGITS,fileno);
+
+				csvfd=open(Tfilename_fileno, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+				if(csvfd<0 && errno==EEXIST) {
+					fileno++;
+					errno=0;
+				} else {
+					// File open operation done (i.e. the file was opened or an error occurred)
+					fileopendone=1; 
+				}
+			}
+
+			free(Tfilename_fileno);
+
+			// Attempted to create W_MAX_FILE_NUMBER different files but they all already exist
+			// In this case, just append to the original file which was specified
+			if(fileopendone==0) {
+				csvfd=open(Tfilename, O_WRONLY | O_APPEND);
+			}
 		}
+	}
+
+	if(csvfd<0) {
+		return csvfd;
 	}
 
 	// Write CSV file header, depending on the followup_on_flag flag value
 	if(followup_on_flag==0) {
-		dprintf(csvfd,"Sequence Number,RTT/Latency,Error\n");
+		dprintf(csvfd,PERPACKET_COMMON_FILE_HEADER_NO_FOLLOWUP);
 	} else {
-		dprintf(csvfd,"Sequence Number,RTT/Latency,Est server processing time,Error\n");
+		dprintf(csvfd,PERPACKET_COMMON_FILE_HEADER_FOLLOWUP);
 	}
+
+	// Write additional data header section (the order in which these 'ifs' are written is important)
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_P)) {
+		dprintf(csvfd,",PER till now");
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_R)) {
+		dprintf(csvfd,",Reconstructed Sequence Number");
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_M)) {
+		dprintf(csvfd,",Current minimum");
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_N)) {
+		dprintf(csvfd,",Current maximum");
+	}
+
+	dprintf(csvfd,"\n");
 
 	return csvfd;
 }
 
-int writeToTFile(int Tfiledescriptor,int followup_on_flag,int decimal_digits,uint64_t seqNo,uint64_t tripTime,uint64_t tripTimeProc) {
-	int dprintf_ret_val;
+// This function tries to open a UDP socket for the per-packet data transmission and a TCP socket for the
+// initial data and final aggregated test data transmission
+// The outcome is considered successful only when both socket are open (and the TCP socket is successfully
+// connected to a server)
+int openReportSocket(report_sock_data_t *sock_data,struct options *opts) {
+	struct sockaddr_in bind_addrin;
+	struct sockaddr_in connect_addrin;
+	struct ifreq ifreq;
+	int connect_timeout_rval=0;
 
-	if(followup_on_flag==0) {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,tripTime==0 ? 1 : 0);
-	} else {
-		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%d\n",seqNo,decimal_digits,(double)tripTime/1000,decimal_digits,(double)tripTimeProc/1000,tripTime==0 ? 1 : 0);
+	if(!opts->udp_params.enabled) {
+		return -3;
 	}
 
+	sock_data->descriptor_udp=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+
+    if(sock_data->descriptor_udp==-1) {
+    	fprintf(stderr,"Error: cannot open UDP socket for per-packet data transmission (-w option).\nDetails: %s\n",strerror(errno));
+        return -1;
+    }
+
+    sock_data->descriptor_tcp=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+
+    if(sock_data->descriptor_tcp==-1) {
+    	close(sock_data->descriptor_udp);
+    	fprintf(stderr,"Error: cannot open TCP socket for per-packet data transmission (-w option).\nDetails: %s\n",strerror(errno));
+        return -1;
+    }
+
+    // Bind to the given interface/IP address, if an interface name was specified
+   	if(opts->udp_params.devname!=NULL) {
+    	// First of all, retrieve the IP address from the specified devname
+    	strncpy(ifreq.ifr_name,opts->udp_params.devname,IFNAMSIZ);
+    	ifreq.ifr_addr.sa_family=AF_INET;
+
+    	if(ioctl(sock_data->descriptor_udp,SIOCGIFADDR,&ifreq)!=-1) {
+			bind_addrin.sin_addr.s_addr=((struct sockaddr_in*)&ifreq.ifr_addr)->sin_addr.s_addr;
+		} else {
+			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\n"
+				"Details: cannot retrieve IP address for interface %s.\n",opts->udp_params.devname);
+			return -3;
+		}
+
+    	bind_addrin.sin_port=0;
+    	bind_addrin.sin_family=AF_INET;
+
+    	// Call bind() to bind the UDP socket to specified interface
+		if(bind(sock_data->descriptor_udp,(struct sockaddr *) &(bind_addrin),sizeof(bind_addrin))<0) {
+			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\nDetails: %s\n",strerror(errno));
+			return -3;
+		}
+
+		// Call bind() to bind the TCP socket to a specified interface
+		if(bind(sock_data->descriptor_udp,(struct sockaddr *) &(bind_addrin),sizeof(bind_addrin))<0) {
+			fprintf(stderr,"Error: cannot bind the UDP socket for per-packet data transmission to\nthe specified interface (-w option).\nDetails: %s\n",strerror(errno));
+			return -3;
+		}
+    }
+
+    // Try to connect to a server (needed for TCP), with a timeout of TCP_w_SOCKET_CONNECT_TIMEOUT milliseconds
+    connect_addrin.sin_addr=opts->udp_params.ip_addr;
+    connect_addrin.sin_port=htons(opts->udp_params.port);
+    connect_addrin.sin_family=AF_INET;
+
+    connect_timeout_rval=connectWithTimeout(sock_data->descriptor_tcp,(struct sockaddr *) &(connect_addrin),sizeof(connect_addrin),TCP_w_SOCKET_CONNECT_TIMEOUT);
+    if(connect_timeout_rval!=0) {
+    	fprintf(stderr,"Error: cannot connect the TCP socket to a server. Please check if any server is running at %s:%" PRIu16 ".\n"
+    		"Details: %s.\n",inet_ntoa(opts->udp_params.ip_addr),opts->udp_params.port,connectWithTimeoutStrError(connect_timeout_rval));
+    	close(sock_data->descriptor_udp);
+    	close(sock_data->descriptor_tcp);
+    	return -2;
+    }
+
+    memset(&(sock_data->addrto),0,sizeof(sock_data->addrto));
+    sock_data->addrto.sin_family=AF_INET;
+    sock_data->addrto.sin_port=htons(opts->udp_params.port);
+    sock_data->addrto.sin_addr.s_addr=opts->udp_params.ip_addr.s_addr;
+
+	return 0;
+}
+
+// When printing additional data with -X, this function shall always be called after updating the report with "reportStructureUpdate()"
+int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData) {
+	int dprintf_ret_val;
+	// "PER Till Now" (Packet Error Rate till now) is basically computed as the percentage packet loss over all the packets before the last one
+	double perTillNow;
+	uint64_t reconstructedSeqNo;
+
+	if(perPktData->followup_on_flag==0) {
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%ld.%06ld,%d",
+			perPktData->seqNo,
+			decimal_digits,(double)(perPktData->signedTripTime)/1000,
+			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
+			perPktData->signedTripTime<=0 ? 1 : 0);
+	} else {
+		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d",
+			perPktData->seqNo,
+			decimal_digits,(double)(perPktData->signedTripTime)/1000,
+			decimal_digits,(double)(perPktData->tripTimeProc)/1000,
+			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
+			perPktData->signedTripTime<=0 ? 1 : 0);
+	}
+
+	// Print extra data to CSV file, if requested with -X
+	// -X 'a' will set all the bits in "enabled_extra_data", thus making the program enter in all the if statements below
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
+		perTillNow=compute_perTillNow(perPktData);
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.2f",perTillNow);
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
+		reconstructedSeqNo=compute_reconstructedSeqNo(perPktData);
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%" PRIu64,reconstructedSeqNo);
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
+		// perPktData->reportDataPointer->minLatency contains the current maximum measured latency (at the end of the test will contain the global test maximum)
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.*f",decimal_digits,compute_minLatency(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
+		// perPktData->reportDataPointer->minLatency contains the current minimum measured latency (at the end of the test will contain the global test minimum)
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.*f",decimal_digits,compute_maxLatency(perPktData));
+	}
+
+	dprintf_ret_val+=dprintf(Tfiledescriptor,"\n");
+
 	return dprintf_ret_val;
+}
+
+int writeToReportSocket(report_sock_data_t *sock_data,int decimal_digits,perPackerDataStructure *perPktData,uint16_t test_id,uint8_t *first_call) {
+	char sockbuff[MAX_w_UDP_SOCK_BUF_SIZE];
+	char sockbuff_tcp[MAX_w_TCP_SOCK_BUF_SIZE];
+	int str_char_count=0;
+	int return_error_code=0;
+
+	if(first_call==NULL) {
+		return -3;
+	}
+
+	if(*first_call) {
+		str_char_count=snprintf(sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE,"LaTeINIT,%" PRIu16 ",fields=",test_id);
+
+		if(perPktData->followup_on_flag==0) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE-str_char_count,"%s",PERPACKET_COMMON_SOCK_HEADER_NO_FOLLOWUP);
+		} else {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_TCP_SOCK_BUF_SIZE-str_char_count,"%s",PERPACKET_COMMON_SOCK_HEADER_FOLLOWUP);
+		}
+
+		// Tell the receiving application which optional fields are set too
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";pertillnow");
+		}
+
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";fullseq");
+		}
+
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";currmin");
+		}
+
+		if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
+			str_char_count+=snprintf(str_char_count+sockbuff_tcp,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,";currmax");
+		}
+
+		// Send the current data via the TCP socket
+		if(sock_data!=NULL) {
+			if(send(sock_data->descriptor_tcp,sockbuff_tcp,strlen(sockbuff_tcp),0)!=strlen(sockbuff_tcp)) {
+				fprintf(stderr,"%s() error: cannot send the current information via the specified TCP socket (-w).\n",__func__);
+				perror("TCP socket error:");
+				return -3;
+			}
+		} else {
+			fprintf(stderr,"%s() error: no valid TCP socket has been set up for the -w option.\n",__func__);
+			return -4;
+		}
+
+		str_char_count=0;
+		*first_call=0;
+	}
+
+	// Prepare the full string (i.e. the UDP packet content) to be sent via the UDP socket
+	if(perPktData->followup_on_flag==0) {
+		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"LaTe,%" PRIu16 ",%" PRIu64 ",%.*f,%ld.%06ld,%d",
+			test_id,
+			perPktData->seqNo,
+			decimal_digits,(double)(perPktData->signedTripTime)/1000,
+			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
+			perPktData->signedTripTime<=0 ? 1 : 0);
+	} else {
+		str_char_count=snprintf(sockbuff,MAX_w_UDP_SOCK_BUF_SIZE,"LaTe,%" PRIu16 "%" PRIu64 ",%.*f,%.*f,%ld.%06ld,%d",
+			test_id,
+			perPktData->seqNo,
+			decimal_digits,(double)(perPktData->signedTripTime)/1000,
+			decimal_digits,(double)(perPktData->tripTimeProc)/1000,
+			(long int)(perPktData->tx_timestamp.tv_sec),(long int)(perPktData->tx_timestamp.tv_usec),
+			perPktData->signedTripTime<=0 ? 1 : 0);
+	}
+
+	// Save the required extra (-X) data too
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_P)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%.2f",compute_perTillNow(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_R)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%" PRIu64,compute_reconstructedSeqNo(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_M)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%.*f",decimal_digits,compute_minLatency(perPktData));
+	}
+
+	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
+		str_char_count+=snprintf(str_char_count+sockbuff,MAX_w_UDP_SOCK_BUF_SIZE-str_char_count,",%.*f",decimal_digits,compute_maxLatency(perPktData));
+	}
+
+	// Send the current data via a UDP socket
+	if(sock_data!=NULL) {
+		if(sendto(sock_data->descriptor_udp,sockbuff,strlen(sockbuff),0,(struct sockaddr *)&(sock_data->addrto),sizeof(struct sockaddr_in))!=strlen(sockbuff)) {
+			fprintf(stderr,"%s() error: cannot send the current information via the specified UDP socket (-w).\n",__func__);
+			perror("UDP socket error:");
+			return_error_code=-1;
+		}
+	} else {
+		fprintf(stderr,"%s() error: no valid UDP socket has been set up for the -w option.\n",__func__);
+		return_error_code=-2;
+	}
+
+	return return_error_code;
 }
 
 void closeTfile(int Tfiledescriptor) {
 	if(Tfiledescriptor>0) {
 		close(Tfiledescriptor);
+	}
+}
+
+void closeReportSocket(report_sock_data_t *sock_data) {
+	if(sock_data==NULL) {
+		return;
+	}
+
+	if(sock_data->descriptor_udp>0) {
+		close(sock_data->descriptor_udp);
+	}
+
+	if(sock_data->descriptor_tcp>0) {
+		close(sock_data->descriptor_tcp);
 	}
 }

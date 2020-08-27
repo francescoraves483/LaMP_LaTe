@@ -30,7 +30,7 @@ OBJ_CC_FULL=$(OBJ_FULL)
 OBJ_CC_FULL+=$(OBJ_RAWSOCK_LIB)
 OBJ_CC_FULL+=$(OBJ_QPID_MODULE)
 
-CFLAGS += -Wall -Wno-stringop-truncation -O2 -Iinclude -IRawsock_lib/Rawsock_lib
+CFLAGS += -Wall -O2 -Iinclude -IRawsock_lib/Rawsock_lib
 LDLIBS += -lpthread -lm
 
 .PHONY: all clean
@@ -46,8 +46,8 @@ compilePCdebug: compilePC
 compileAPUdebug: CFLAGS += -g
 compileAPUdebug: compileAPU
 
-compilePCfull: LDLIBS += -lqpid-proton
-compilePCfull: CFLAGS += -DAMQP_1_0_ENABLED -Iinclude/qpid_proton
+compilePCfull: LDLIBS += -lqpid-proton -L/data/data/com.termux/files/home/libs/lib64
+compilePCfull: CFLAGS += -DAMQP_1_0_ENABLED -Iinclude/qpid_proton -I/data/data/com.termux/files/home/libs/include
 
 compilePCfulldebug: CFLAGS += -g
 compilePCfulldebug: compilePCfull

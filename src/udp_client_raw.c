@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <linux/errqueue.h>
 #include "timeval_utils.h"
+#include "carbon_thread_manager.h"
 #include "common_thread.h"
 #include "timer_man.h"
 #include "common_udp.h"
@@ -20,6 +21,9 @@
 static pthread_t txLoop_tid, rxLoop_tid, ackListenerInit_tid, initSender_tid, followupReplyListener_tid, followupRequestSender_tid;
 static uint16_t lamp_id_session;
 static reportStructure reportData;
+static carbonReportStructure carbonReportData;
+static int carbon_metrics_flush_first;
+static carbon_pthread_data_t ctd;
 
 // Transmit error container
 static t_error_types t_tx_error=NO_ERR;
@@ -45,6 +49,13 @@ static uint8_t ack_init_received=0; // Global flag set by the ackListener thread
 static pthread_mutex_t ack_init_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the ack_received variable (as it written by a thread and read by another one)
 static uint8_t followup_reply_received=0; // Global flag set by the followupReplyListener thread: = 1 when a reply has been received, otherwise it is = 0
 static pthread_mutex_t followup_reply_received_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the followup_reply_received variable
+
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+	static _Atomic int rx_loop_timeout_error=0; // If C11 atomic variables are supported, just define an atomic integer variable
+#else
+	static uint8_t rx_loop_timeout_error=0; // Global flag which is set to 1 by the rx loop, in bidirectional mode, when a timeout occurs, to stop also the tx loop
+	static pthread_mutex_t rx_loop_timeout_error_mut=PTHREAD_MUTEX_INITIALIZER; // Mutex to protect the rx_loop_timeout_error_mut variable
+#endif
 
 extern inline int timevalSub(struct timeval *in, struct timeval *out);
 
@@ -90,7 +101,7 @@ static void *initSender (void *arg) {
 	int return_value;
 	controlRCVdata initData;
 
-	initData.controlRCV.ip=args->opts->destIPaddr;
+	initData.controlRCV.ip=args->opts->dest_addr_u.destIPaddr;
 	initData.controlRCV.port=CLIENT_SRCPORT;
 	initData.controlRCV.session_id=lamp_id_session;
 	memcpy(initData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
@@ -168,7 +179,7 @@ static void *followupRequestSender (void *arg) {
 	}
 
 	if(t_tx_error!=ERR_SEND_FOLLOWUP) {
-		fuData.controlRCV.ip=args->opts->destIPaddr;
+		fuData.controlRCV.ip=args->opts->dest_addr_u.destIPaddr;
 		fuData.controlRCV.port=CLIENT_SRCPORT;
 		fuData.controlRCV.session_id=lamp_id_session;
 		memcpy(fuData.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
@@ -211,9 +222,14 @@ static void txLoop (arg_struct *args) {
 	struct lamphdr *inpacket_lamphdr;
 
 	// Timer management variables
-	struct pollfd timerMon;
+	struct pollfd timerMon[2];
+	int pollfd_size;
 	int clockFd;
 	int timerCaS_res=0;
+
+	// Test duration specific timer variables
+	int durationClockFd;
+	int sendLast=0;
 
 	// Junk variable (needed to clear the timer event with read())
 	unsigned long long junk;
@@ -221,8 +237,9 @@ static void txLoop (arg_struct *args) {
 	// Payload buffer
 	byte_t *payload_buff=NULL;
 
-	// while loop counter
+	// while loop counters
 	unsigned int counter=0;
+	unsigned int batch_counter=0;
 
 	// Final packet size
 	size_t finalpktsize;
@@ -260,7 +277,7 @@ static void txLoop (arg_struct *args) {
 	// Populating headers
 	// [IMPROVEMENT] Future improvement: get destination MAC through ARP or broadcasted information and not specified by the user
 	etherheadPopulate(&(headers.etherHeader), args->srcMAC, args->opts->destmacaddr, ETHERTYPE_IP);
-	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, args->opts->destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
+	IP4headPopulateS(&(headers.ipHeader), args->sData.devname, args->opts->dest_addr_u.destIPaddr, 0, 0, BASIC_UDP_TTL, IPPROTO_UDP, FLAG_NOFRAG_MASK, &ipaddrs);
 	UDPheadPopulate(&(headers.udpHeader), CLIENT_SRCPORT, args->opts->port);
 	if(args->opts->mode_ub==PINGLIKE) {
 		if(args->opts->latencyType==SOFTWARE || args->opts->latencyType==HARDWARE) {
@@ -275,7 +292,7 @@ static void txLoop (arg_struct *args) {
 			ctrl=CTRL_UNIDIR_CONTINUE;
 		}
 	}
-	lampHeadPopulate(&(headers.lampHeader), ctrl, lamp_id_session, 0); // Starting from sequence number = 0
+	lampHeadPopulate(&(headers.lampHeader), ctrl, lamp_id_session, INITIAL_SEQ_NO); // Starting from sequence number = 0
 
 	// Allocating packet buffers (with and without payload)
 	if(args->opts->payloadlen!=0) {
@@ -368,7 +385,7 @@ static void txLoop (arg_struct *args) {
 	end_flag=FLG_CONTINUE;
 
 	// Create and start timer
-	timerCaS_res=timerCreateAndSet(&timerMon, &clockFd, args->opts->interval);
+	timerCaS_res=timerCreateAndSet(&timerMon[0], &clockFd, args->opts->interval);
 
 	if(timerCaS_res==-1) {
 		t_tx_error=ERR_TIMERCREATE;
@@ -378,12 +395,74 @@ static void txLoop (arg_struct *args) {
 		pthread_exit(NULL);
 	}
 
-	// Run until 'number' is reached
-	while(counter<args->opts->number) {
+	// Create and start test duration timer (if required only - i.e. if the user specified -i)
+	if(args->opts->duration_interval>0 || args->opts->seconds_to_end!=-1) {
+		pollfd_size=2; // poll() will monitor two descriptors
+
+		if(args->opts->seconds_to_end!=-1) {
+			setTestDurationEndTime(args->opts);
+		}
+		timerCaS_res=timerCreateAndSet(&timerMon[1],&durationClockFd,args->opts->duration_interval*1000);
+
+		if(timerCaS_res==-1) {
+			t_tx_error=ERR_TIMERCREATE;
+			close(clockFd);
+			pthread_exit(NULL);
+		} else if(timerCaS_res==-2) {
+			t_tx_error=ERR_SETTIMER;
+			close(clockFd);
+			pthread_exit(NULL);
+		}
+	} else {
+		pollfd_size=1; // poll() will monitor one descriptor only (clockFd)
+	}
+
+	if(args->opts->duration_interval>0) {
+		args->opts->number=UINT64_MAX;
+	}
+
+	// Run until 'number' is reached or until the time specified with -i elapses
+	while(counter<args->opts->number && sendLast==0) {
+		// Stop the loop if the rx loop has reported a timeout
+		#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+			if(rx_loop_timeout_error==1) {
+				break;
+			}
+		#else
+			pthread_mutex_lock(&rx_loop_timeout_error_mut);
+			if(rx_loop_timeout_error==1) {
+				break;
+			}
+			pthread_mutex_unlock(&rx_loop_timeout_error_mut);
+		#endif
+
 		// poll waiting for events happening on the timer descriptor (i.e. wait for timer expiration)
-		if(poll(&timerMon,1,INDEFINITE_BLOCK)>0) {
+		if(poll(timerMon,pollfd_size,INDEFINITE_BLOCK)>0) {
+			// If the duration timer expired, send now the last packet and set sendLast to 1 to terminate the current test
+			if(args->opts->duration_interval!=0 && timerMon[1].revents>0) {
+				if(read(durationClockFd,&junk,sizeof(junk))==-1) {
+					t_tx_error=ERR_CLEAR_TIMER_EVENT;
+					break;
+				}
+
+				timerStop(&durationClockFd);
+				sendLast=1;
+			}
+
 			// "Clear the event" by performing a read() on a junk variable
-			read(clockFd,&junk,sizeof(junk));
+			if(timerMon[0].revents>0 && read(clockFd,&junk,sizeof(junk))==-1) {
+				t_tx_error=ERR_CLEAR_TIMER_EVENT;
+				break;
+			}
+
+			// Rearm timer with a random timeout if '-R' was specified
+			if(sendLast!=1 && args->opts->rand_type!=NON_RAND && batch_counter==args->opts->rand_batch_size) {
+				if(timerRearmRandom(clockFd,args->opts)<0) {
+					t_tx_error=ERR_RANDSETTIMER;
+					pthread_exit(NULL);
+				}
+				batch_counter=0;
+			}
 			
 			// Prepare datagram
 			IP4headAddID(&(headers.ipHeader),(unsigned short) id);
@@ -406,8 +485,8 @@ static void txLoop (arg_struct *args) {
 					MAC_PRINTER(args->opts->destmacaddr), lamp_id_session, counter);
 			}
 
-			// Set end flag to FLG_STOP when it's time to send the last packet
-			if(counter==(args->opts->number-1)) {
+			// Set end flag to FLG_STOP when it is time to send the last packet
+			if(counter==(args->opts->number-1) || sendLast==1) {
 					end_flag=FLG_STOP;
 			}
 
@@ -461,12 +540,18 @@ static void txLoop (arg_struct *args) {
 
 			// Increase counter
 			counter++;
+			if(args->opts->rand_type!=NON_RAND) batch_counter++;
 		}
 	}
 
 	// Free payload buffer
 	if(args->opts->payloadlen!=0) {
 		free(payload_buff);
+	}
+
+	// Set the report's total packets value to the amount of packets sent during this test, if -i was used
+	if(args->opts->duration_interval!=0) {
+		reportStructureChangeTotalPackets(&reportData,counter);
 	}
 
 	// Close timer file descriptor
@@ -524,9 +609,23 @@ static void *rxLoop_t (void *arg) {
 	char ctrlBufKrt[CMSG_SPACE(sizeof(struct timeval))];
 	char ctrlBufHwSw[CMSG_SPACE(sizeof(struct scm_timestamping))];
 
+	// Per-packet data structure (to be used when -W is selected)
+	// The followup_on_flag can be already set here, just like the pointer to the report structure
+	perPackerDataStructure perPktData;
+	perPktData.followup_on_flag=args->opts->followup_mode!=FOLLOWUP_OFF;
+	perPktData.enabled_extra_data=args->opts->report_extra_data;
+	perPktData.reportDataPointer=&reportData;
+
+	// timevalStoreList to store the tx_timestamp values when -W is selected and follow-up mode is active
+	// A better explanation of this can be found in the comments inside udp_client.c
+	timevalStoreList txstampslist=NULL_SL;
+
 	int fu_flag=1; // Flag set to 0 when a follow-up is received after an ENDREPLY or ENDREPLY_TLESS (SOFTWARE or HARDWARE latencyType only, fixed to 0 for other types)
 	int continueFlag=1; // Flag set to 0 when an ENDREPLY or ENDREPLY_TLESS is received
 	int errorTsFlag=0; // Flag set to 1 when an error occurred in retrieving a timestamp (i.e. if no latency data can be reported for the current packet)
+
+	// Flag managed internally by writeToReportSocket()
+	uint8_t first_call=1;
 
 	// Container for the source MAC address (read from packet)
 	macaddr_t srcmacaddr_pkt=prepareMacAddrT();
@@ -565,9 +664,19 @@ static void *rxLoop_t (void *arg) {
 		mhdr.msg_flags=NO_FLAGS;
 	}
 
+	// Initialize txstampslist (if follow-up mode is enabled)
+	if(args->opts->Wfilename!=NULL && args->opts->followup_mode!=FOLLOWUP_OFF) {
+		txstampslist=timevalSL_init();
+
+		if(CHECK_SL_NULL(txstampslist)) {
+			fprintf(stderr,"Warning: unable to allocate/initialize memory for saving per-packer tx timestamps to a CSV file.\nThe -W option will be disabled.\n");
+			args->opts->Wfilename=NULL;
+		}
+	}
+
 	// Open CSV file when in "-W" mode (i.e. "write every packet measurement data to CSV file")
 	if(args->opts->Wfilename!=NULL) {
-		Wfiledescriptor=openTfile(args->opts->Wfilename,args->opts->followup_mode!=FOLLOWUP_OFF);
+		Wfiledescriptor=openTfile(args->opts->Wfilename,args->opts->overwrite_W,args->opts->followup_mode!=FOLLOWUP_OFF,args->opts->report_extra_data);
 		if(Wfiledescriptor<0) {
 			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
 		}
@@ -593,6 +702,17 @@ static void *rxLoop_t (void *arg) {
 			if(errno==EAGAIN) {
 				t_rx_error=ERR_TIMEOUT;
 				fprintf(stderr,"Timeout when waiting for new packets.\n");
+
+				// Signal to the tx loop that a timeout error occurred
+				#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__))
+					rx_loop_timeout_error=1;
+				#else
+					pthread_mutex_lock(&rx_loop_timeout_error_mut);
+					rx_loop_timeout_error=1;
+					pthread_mutex_unlock(&rx_loop_timeout_error_mut);
+				#endif
+
+				reportSetTimeoutOccurred(&reportData);
 			} else {
 				t_rx_error=ERR_RECVFROM_GENERIC;
 			}
@@ -668,6 +788,15 @@ static void *rxLoop_t (void *arg) {
 				tx_timestamp=packet_timestamp;
 			}
 
+			// Store tx_timestamp inside txstampslist, when -W is used together with -F
+			if(Wfiledescriptor>0 && args->opts->followup_mode!=FOLLOWUP_OFF) {
+				if(errorTsFlag==1) {
+					tx_timestamp.tv_sec=0;
+					tx_timestamp.tv_usec=0;
+				}
+				timevalSL_insert(txstampslist,lamp_seq_rx,tx_timestamp);
+			}
+
 			if(errorTsFlag==0) {
 				if(timevalSub(&tx_timestamp,&rx_timestamp)) {
 					fprintf(stderr,"Warning: negative latency!\nThis could potentually indicate that SO_TIMESTAMP is not working properly on your system.\n");
@@ -719,7 +848,8 @@ static void *rxLoop_t (void *arg) {
 		}
 
 		// When using the follow-up mode, data is printed only when both the reply and the follow-up have been received
-		if(args->opts->followup_mode==FOLLOWUP_OFF || (args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA)) {
+		if((args->opts->followup_mode==FOLLOWUP_OFF && (lamp_type_rx==PINGLIKE_REPLY || lamp_type_rx==PINGLIKE_ENDREPLY || lamp_type_rx==PINGLIKE_REPLY_TLESS || lamp_type_rx==PINGLIKE_ENDREPLY_TLESS)) || 
+			(args->opts->followup_mode!=FOLLOWUP_OFF && lamp_type_rx==FOLLOWUP_DATA)) {
 			if(tripTime!=0) {
 				// Get source MAC address from packet
 				getSrcMAC(headerptrs.etherHeader,srcmacaddr_pkt);
@@ -745,8 +875,40 @@ static void *rxLoop_t (void *arg) {
 			reportStructureUpdate(&reportData,tripTime,lamp_seq_rx);
 
 			// In "-W" mode, write the current measured value to the specified CSV file too (if a file was successfully opened)
-			if(Wfiledescriptor>0) {
-				writeToTFile(Wfiledescriptor,args->opts->followup_mode!=FOLLOWUP_OFF,W_DECIMAL_DIGITS,lamp_seq_rx,tripTime,tripTimeProc);
+			if(Wfiledescriptor>0 || args->opts->udp_params.enabled) {
+				perPktData.seqNo=lamp_seq_rx;
+				perPktData.signedTripTime=tripTime;
+				perPktData.tripTimeProc=tripTimeProc;
+
+				if(args->opts->followup_mode!=FOLLOWUP_OFF) {
+					timevalSL_gather(txstampslist,lamp_seq_rx,&tx_timestamp);
+				}
+
+				perPktData.tx_timestamp=tx_timestamp;
+
+				if(Wfiledescriptor>0) {
+					writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+				}
+
+				if(args->opts->udp_params.enabled) {
+					writeToReportSocket(&(args->sData.sock_w_data),W_DECIMAL_DIGITS,&perPktData,lamp_id_session,&first_call);
+				}
+			}
+
+			// When -g is specified, update the Carbon/Graphite report structure
+			// If this is the first time this point is reached, also start the metrics flush thread
+			if(args->opts->carbon_sock_params.enabled) {
+				if(carbon_metrics_flush_first==1) {
+					carbon_metrics_flush_first=0;
+					if(startCarbonTimedThread(&ctd,&carbonReportData,args->opts)<0) {
+						t_rx_error=ERR_CARBON_THREAD;
+						break;
+					}
+				}
+
+				carbon_pthread_mutex_lock(ctd);
+				carbonReportStructureUpdate(&carbonReportData,tripTime,lamp_seq_rx,args->opts->dup_detect_enabled);
+				carbon_pthread_mutex_unlock(ctd);
 			}
 
 			if(continueFlag==0) {
@@ -761,6 +923,10 @@ static void *rxLoop_t (void *arg) {
 
 	// Free source MAC address memory area
 	freeMacAddrT(srcmacaddr_pkt);
+
+	if(!CHECK_SL_NULL(txstampslist)) {
+		timevalSL_free(txstampslist);
+	}
 
 	pthread_exit(NULL);
 }
@@ -806,7 +972,7 @@ static void unidirRxTxLoop (arg_struct *args) {
 		// Timeout or other recvfrom() error occurred
 		if(rcv_bytes==-1) {
 			if(errno==EAGAIN) {
-				t_rx_error=ERR_TIMEOUT;
+				t_rx_error=ERR_REPORT_TIMEOUT;
 				fprintf(stderr,"Timeout when waiting for the report. No report will be printed by the client.\n");
 			} else {
 				t_rx_error=ERR_RECVFROM_GENERIC;
@@ -861,7 +1027,7 @@ static void unidirRxTxLoop (arg_struct *args) {
 		repscanf((const char *)payload,&reportData);
 
 		// Fill the ACKdata structure
-		ACKdata.controlRCV.ip=args->opts->destIPaddr;
+		ACKdata.controlRCV.ip=args->opts->dest_addr_u.destIPaddr;
 		ACKdata.controlRCV.port=CLIENT_SRCPORT;
 		memcpy(ACKdata.controlRCV.mac,args->opts->destmacaddr,ETHER_ADDR_LEN);
 
@@ -887,18 +1053,36 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	// Inform the user about the current options
 	fprintf(stdout,"UDP client started, with options:\n\t[socket type] = RAW\n"
 		"\t[interval] = %" PRIu64 " ms\n"
-		"\t[reception timeout] = %" PRIu64 " ms\n"
-		"\t[total number of packets] = %" PRIu64 "\n"
-		"\t[mode] = %s\n"
+		"\t[reception timeout] = %" PRIu64 " ms\n",
+		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+opts->client_timeout : opts->interval+opts->client_timeout);
+
+	if(opts->duration_interval!=0) {
+		fprintf(stdout,"\t[test duration] = %" PRIu32 " s\n",
+			opts->duration_interval);
+	} else {
+		fprintf(stdout,"\t[total number of packets] = %" PRIu64 "\n",
+			opts->number);
+	}
+
+	fprintf(stdout,"\t[mode] = %s\n"
 		"\t[payload length] = %" PRIu16 " B \n"
 		"\t[destination IP address] = %s\n"
 		"\t[latency type] = %s\n"
-		"\t[follow-up] = %s\n",
-		opts->interval, opts->interval<=MIN_TIMEOUT_VAL_C ? MIN_TIMEOUT_VAL_C+2000 : opts->interval+2000,
-		opts->number, opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
-		opts->payloadlen, inet_ntoa(opts->destIPaddr),
+		"\t[follow-up] = %s\n"
+		"\t[random interval] = %s\n",
+		opts->mode_ub==UNIDIR ? "unidirectional" : "ping-like", 
+		opts->payloadlen, inet_ntoa(opts->dest_addr_u.destIPaddr),
 		latencyTypePrinter(opts->latencyType),
-		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On");
+		opts->followup_mode==FOLLOWUP_OFF ? "Off" : "On",
+		opts->rand_type==NON_RAND ? "fixed periodic" : enum_to_str_rand_distribution_t(opts->rand_type)
+		);
+
+	if(opts->rand_type==NON_RAND) {
+		fprintf(stdout,"\t[random interval batch] = -\n");
+	} else {
+		fprintf(stdout,"\t[random interval batch] = %" PRIu64 "\n",
+			opts->rand_batch_size);
+	}
 
 	// Print current UP
 	if(opts->macUP==UINT8_MAX) {
@@ -917,7 +1101,20 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 	}
 
 	// Initialize the report structure
-	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode);
+	reportStructureInit(&reportData, 0, opts->number, opts->latencyType, opts->followup_mode, opts->dup_detect_enabled);
+
+	// Initialize the Carbon report structure, if the -g option is used
+	if(opts->carbon_sock_params.enabled) {
+		if(openCarbonReportSocket(&carbonReportData,opts)<0) {
+			fprintf(stderr,"Error: cannot open the socket for sending the data to Carbon/Graphite.\n");
+			return 2;
+		}
+
+		carbonReportStructureInit(&carbonReportData,opts);
+
+		// This flag is used to understand when the first data is available, in order to start the metrics flush thread (see carbon_thread_manager.c)
+		carbon_metrics_flush_first=1;
+	}
 
 	// Populate/initialize the 'args' structs
 	args.sData=sData;
@@ -1021,6 +1218,11 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 			fprintf(stderr,"Error: some unknown error caused the mode not be set when starting the UDP client.\n");
 			return 1;
 		}
+
+		// Terminate the carbon flush thread
+		if(opts->carbon_sock_params.enabled && t_rx_error!=ERR_CARBON_THREAD) {
+			stopCarbonTimedThread(&ctd);
+		}
 	} else {
 		fprintf(stderr,"Error: the init procedure could not be completed. No test will be performed.\n");
 	}
@@ -1033,20 +1235,41 @@ unsigned int runUDPclient_raw(struct lampsock_data sData, macaddr_t srcMAC, stru
 
 	if(t_rx_error!=NO_ERR) {
 		thread_error_print("UDP Rx loop", t_rx_error);
+
+		// Directly return only if a timeout did not occur, as, in case of timeout, we should still print the report.
+		// If we exit now, losing the last packet (ENDREPLY or ENDREPLY_TLESS), which causes a timeout in the rx loop,
+		// may mean losing the whole test, which is not desiderable
+		if(t_rx_error!=ERR_TIMEOUT && t_rx_error!=ERR_REPORT_TIMEOUT) {
+			return 1;
+		}
 		return 1;
 	}
 
-	/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
-	with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
-	fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
-	// Print the statistics, if no error, before returning
-	reportStructureFinalize(&reportData);
-	printStats(&reportData,stdout,opts->confidenceIntervalMask);
+	if(t_rx_error!=ERR_REPORT_TIMEOUT) {
+		/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
+		with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
+		fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
+		// Print the statistics, if no error, before returning
+		reportStructureFinalize(&reportData);
+		printStats(&reportData,stdout,opts->confidenceIntervalMask);
+	}
 
 	if(opts->filename!=NULL) {
 		// If '-f' was specified, print the report data to a file too
 		printStatsCSV(opts,&reportData,opts->filename);
 	}
+
+	if(opts->udp_params.enabled) {
+		// If '-w' was specified, send the report data inside a TCP packet, through a socket
+		printStatsSocket(opts,&reportData,&(sData.sock_w_data),lamp_id_session);
+	}
+
+	if(opts->carbon_sock_params.enabled) {
+		closeCarbonReportSocket(&carbonReportData);
+		carbonReportStructureFree(&carbonReportData,opts);
+	}
+
+	reportStructureFree(&reportData);
 
 	if(!CHECK_SL_NULL(tslist)) {
 		timevalSL_free(tslist);
