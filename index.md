@@ -35,7 +35,7 @@ export LD_LIBRARY_PATH=/data/data/com.termux/files/home/libs
 
 Please note that in order to compile Qpid Proton on Android, you may need to manually patch the library. For your conveniency, an already patched QPid Proton C library (version 0.30.0) is available [here](https://github.com/francescoraves483/qpid-proton).
 
-**LaTe** has been extensively tested on Linux kernel versions 4.14, 4.15, 5.0 and 5.4 and it is currently using the [**Rawsock library, version 0.3.3**](https://github.com/francescoraves483/Rawsock_lib).
+**LaTe** has been extensively tested on Linux kernel versions 4.14, 4.15, 5.0 and 5.4 and it is currently using the [**Rawsock library, version 0.3.4**](https://github.com/francescoraves483/Rawsock_lib).
 
 ## How to compile
 
@@ -233,7 +233,7 @@ This mechanism may be suject to changes in the future.
 
 # Version information
 
-The current non-development version is **0.1.6-beta**, using **LaMP rev 2.0** and **Rawsock library v0.3.3**.
+The current non-development version is **0.1.6-beta**, using **LaMP rev 2.0** and **Rawsock library v0.3.4**.
 
 Developed in **Politecnico di Torino**, licensed under **GPLv2**.
 
