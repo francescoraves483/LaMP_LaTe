@@ -195,6 +195,7 @@ struct options {
 	uint8_t verboseFlag; // =1 if verbose mode is on, =0 otherwise (default: 0, i.e. no -V specified)
 	char *Wfilename; // Filename for the -W mode
 	uint8_t printAfter; // Server only. =0 if the server should print that a packet was received before sending the reply, =1 to print after sending the reply (default: 0)
+	uint8_t initial_timeout_server;
 
 	union {
 		struct in_addr destIPaddr;

@@ -71,10 +71,13 @@
 #define LONGOPT_B "bidir"
 #define LONGOPT_U "unidir"
 
+#define LONGOPT_initial_timeout "initial-timeout"
+
 #define LONGOPT_t_client "interval"
 #define LONGOPT_t_server "server-timeout"
 #define LONGOPT_t_client_val 256
 #define LONGOPT_t_server_val 257
+#define LONGOPT_initial_timeout_server_val 258
 
 #define LONGOPT_STR_CONSTRUCTOR(LONGOPT_STR) "  --"LONGOPT_STR"\n"
 
@@ -91,6 +94,7 @@ static const struct option late_long_opts[]={
 	// inside parse_options())
 	{LONGOPT_t_client,	required_argument, 	NULL, LONGOPT_t_client_val},
 	{LONGOPT_t_server,	required_argument, 	NULL, LONGOPT_t_server_val},
+	{LONGOPT_initial_timeout, no_argument, NULL, LONGOPT_initial_timeout_server_val},
 	{LONGOPT_z,			required_argument,	NULL, 'z'},
 	{LONGOPT_A,			required_argument,	NULL, 'A'},
 	{LONGOPT_C,			required_argument,	NULL, 'C'},
@@ -405,6 +409,10 @@ static const struct option late_long_opts[]={
 	"\t  Remember that, when -D is used and several duplicated packets are present, the packet loss estimation may be inaccurate\n" \
 	"\t  or, in the worst case, wrong. In this case, duplicated packets are normally considered as \"out of order\".\n"
 
+#define OPT_initial_timeout_server \
+	"  --"LONGOPT_initial_timeout": make the server terminate after the timeout specified with -t, even if no client\n" \
+	"\t   attempted a connection.\n"
+
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
 // Safer implementation of strchr for the -w option, reading up to the maximum expected number of characters in -w (i.e. MAX_w_STRING_SIZE)
@@ -612,6 +620,7 @@ static void print_long_info(void) {
 			OPT_V_both
 			OPT_0_server
 			OPT_1_server
+			OPT_initial_timeout_server
 
 			// File options
 			OPT_g_both
@@ -697,6 +706,7 @@ void options_initialize(struct options *options) {
 	options->number=CLIENT_DEF_NUMBER;
 	options->duration_interval=0;
 	options->payloadlen=0;
+	options->initial_timeout_server=0;
 
 	// Initial UP is set to 'UINT8_MAX', as it should not be a valid value
 	// When this value is detected by the application, no setsockopt is called
@@ -1466,6 +1476,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				options->printAfter=1;
 				break;
 
+			case LONGOPT_initial_timeout_server_val:
+				options->initial_timeout_server=1;
+				break;
+
 			default:
 				print_short_info_err(options);
 
@@ -1512,7 +1526,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
 		}
 		if(t_long_flag==2) {
-			fprintf(stderr,"Error: --server-timeout is a server only option.\n");
+			fprintf(stderr,"Error: --"LONGOPT_t_server" is a server only option.\n");
+			print_short_info_err(options);
+		}
+		if(options->initial_timeout_server==1) {
+			fprintf(stderr,"Error: --"LONGOPT_initial_timeout" is a server only option.\n");
 			print_short_info_err(options);
 		}
 	} else if(options->mode_cs==SERVER) {
@@ -1565,7 +1583,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Warning: -D was specified but unidirectional mode is selected. -D will be ignored.\n");
 		}
 		if(t_long_flag==2) {
-			fprintf(stderr,"Error: --server-timeout is a server only option.\n");
+			fprintf(stderr,"Error: --"LONGOPT_t_server" is a server only option.\n");
+			print_short_info_err(options);
+		}
+		if(options->initial_timeout_server==1) {
+			fprintf(stderr,"Error: --"LONGOPT_initial_timeout" is a server only option.\n");
 			print_short_info_err(options);
 		}
 	} else if(options->mode_cs==LOOPBACK_SERVER) {

@@ -4,6 +4,7 @@
 #include <time.h>
 #include "rawsock.h"
 #include "rawsock_lamp.h"
+#include "timer_man.h"
 #include "udp_client_raw.h"
 #include "udp_server_raw.h"
 #include "udp_client.h"
@@ -123,9 +124,20 @@ int main (int argc, char **argv) {
 			break;
 			case SERVER:
 			case LOOPBACK_SERVER:
-				// Server should start with a very big timeout, and then set it equal to -t (but the latter is performed inside udp_server.c)
-				rx_timeout.tv_sec=86400; //... for instance, 86400 s = 24 h
-				rx_timeout.tv_usec=0;
+				if(opts.initial_timeout_server==0) {
+					// Server should start with a very big timeout, and then set it equal to -t (but the latter is performed inside the server modules, e.g. udp_server.c)
+					rx_timeout.tv_sec=86400; //... for instance, 86400 s = 24 h
+					rx_timeout.tv_usec=0;
+				} else {
+					// Set a timeout from the beginning, as defined by the user with -t or equal to MIN_TIMEOUT_VAL_S ms if the user specified less than MIN_TIMEOUT_VAL_S ms
+					if(opts.interval<=MIN_TIMEOUT_VAL_S) {
+						rx_timeout.tv_sec=MIN_TIMEOUT_VAL_S/1000;
+						rx_timeout.tv_usec=0;
+					} else {
+						rx_timeout.tv_sec=(time_t) ((opts.interval)/MILLISEC_TO_SEC);
+						rx_timeout.tv_usec=MILLISEC_TO_MICROSEC*opts.interval-rx_timeout.tv_sec*SEC_TO_MICROSEC;
+					}
+				}
 			break;
 			default:
 				// Should never enter here
