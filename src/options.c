@@ -72,12 +72,14 @@
 #define LONGOPT_U "unidir"
 
 #define LONGOPT_initial_timeout "initial-timeout"
+#define LONGOPT_log_init_failures "log-init-failures"
 
 #define LONGOPT_t_client "interval"
 #define LONGOPT_t_server "server-timeout"
 #define LONGOPT_t_client_val 256
 #define LONGOPT_t_server_val 257
 #define LONGOPT_initial_timeout_server_val 258
+#define LONGOPT_log_init_failures_client_val 259
 
 #define LONGOPT_STR_CONSTRUCTOR(LONGOPT_STR) "  --"LONGOPT_STR"\n"
 
@@ -95,6 +97,7 @@ static const struct option late_long_opts[]={
 	{LONGOPT_t_client,	required_argument, 	NULL, LONGOPT_t_client_val},
 	{LONGOPT_t_server,	required_argument, 	NULL, LONGOPT_t_server_val},
 	{LONGOPT_initial_timeout, no_argument, NULL, LONGOPT_initial_timeout_server_val},
+	{LONGOPT_log_init_failures, no_argument, NULL, LONGOPT_log_init_failures_client_val},
 	{LONGOPT_z,			required_argument,	NULL, 'z'},
 	{LONGOPT_A,			required_argument,	NULL, 'A'},
 	{LONGOPT_C,			required_argument,	NULL, 'C'},
@@ -413,6 +416,12 @@ static const struct option late_long_opts[]={
 	"  --"LONGOPT_initial_timeout": make the server terminate after the timeout specified with -t, even if no client\n" \
 	"\t   attempted a connection.\n"
 
+#define OPT_log_init_failures_client \
+	"  --"LONGOPT_log_init_failures": enables logging of empty lines to the CSV file specified with -f when failures\n" \
+	"\t   occur during the INIT procedure. The normal behaviour, when no connection can be established between client\n" \
+	"\t   and server, is to leave the CSV file untouched, without adding any line related to a failed test.\n" \
+	"\t   This option is client-only and can be selected only together with -f or --"LONGOPT_f".\n"
+
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
 // Safer implementation of strchr for the -w option, reading up to the maximum expected number of characters in -w (i.e. MAX_w_STRING_SIZE)
@@ -572,6 +581,7 @@ static void print_long_info(void) {
 			OPT_R_client	
 			OPT_T_client
 			OPT_V_both
+			OPT_log_init_failures_client
 
 			// File options
 			OPT_f_client
@@ -707,6 +717,7 @@ void options_initialize(struct options *options) {
 	options->duration_interval=0;
 	options->payloadlen=0;
 	options->initial_timeout_server=0;
+	options->log_init_failures=0;
 
 	// Initial UP is set to 'UINT8_MAX', as it should not be a valid value
 	// When this value is detected by the application, no setsockopt is called
@@ -1480,6 +1491,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				options->initial_timeout_server=1;
 				break;
 
+			case LONGOPT_log_init_failures_client_val:
+				options->log_init_failures=1;
+				break;
+
 			default:
 				print_short_info_err(options);
 
@@ -1563,6 +1578,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: --interval is a client only option.\n");
 			print_short_info_err(options);
 		}
+		if(options->log_init_failures==1) {
+			fprintf(stderr,"Error: --"LONGOPT_log_init_failures" is a client only option.\n");
+			print_short_info_err(options);
+		}
 	} else if(options->mode_cs==LOOPBACK_CLIENT) {
 		if(eI_flag==1) {
 			fprintf(stderr,"Error: -I/-e are not supported when using loopback interfaces, as only one interface is used.\n");
@@ -1628,6 +1647,10 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 			fprintf(stderr,"Error: --interval is a client only option.\n");
 			print_short_info_err(options);
 		}
+		if(options->log_init_failures==1) {
+			fprintf(stderr,"Error: --"LONGOPT_log_init_failures" is a client only option.\n");
+			print_short_info_err(options);
+		}
 	}
 
 	#if AMQP_1_0_ENABLED
@@ -1691,6 +1714,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		}
 	}
 	#endif
+
+	if(options->log_init_failures==1 && options->filename==NULL) {
+			fprintf(stderr,"Error: --"LONGOPT_log_init_failures" can only be specified together with -f or --"LONGOPT_f".\n");
+			print_short_info_err(options);
+	}
 
 	// -i and -z cannot be specified together
 	if(options->seconds_to_end!=-1 && options->duration_interval!=0) {

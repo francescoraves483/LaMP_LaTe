@@ -1105,12 +1105,12 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		// Directly return only if a timeout did not occur, as, in case of timeout, we should still print the report.
 		// If we exit now, losing the last packet (ENDREPLY or ENDREPLY_TLESS), which causes a timeout in the rx loop,
 		// may mean losing the whole test, which is not desiderable
-		if(t_rx_error!=ERR_TIMEOUT && t_rx_error!=ERR_REPORT_TIMEOUT) {
+		if(t_rx_error!=ERR_TIMEOUT && t_rx_error!=ERR_REPORT_TIMEOUT && opts->log_init_failures==0) {
 			return 1;
 		}
 	}
 
-	if(t_rx_error!=ERR_REPORT_TIMEOUT) {
+	if(t_rx_error!=ERR_REPORT_TIMEOUT && t_rx_error!=NO_ERR) {
 		/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
 		with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
 		fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");

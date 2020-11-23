@@ -196,6 +196,7 @@ struct options {
 	char *Wfilename; // Filename for the -W mode
 	uint8_t printAfter; // Server only. =0 if the server should print that a packet was received before sending the reply, =1 to print after sending the reply (default: 0)
 	uint8_t initial_timeout_server;
+	uint8_t log_init_failures;
 
 	union {
 		struct in_addr destIPaddr;
