@@ -286,7 +286,7 @@ static const struct option late_long_opts[]={
 	LONGOPT_STR_CONSTRUCTOR(LONGOPT_W) \
 	"  -W <filename, without extension>: write, for the current test only, the single packet latency\n" \
 	"\t  measurement data to the specified CSV file.\n" \
-	"\t  When this option is specified LaTe wull check if the specified .csv file already exists. If yes,\n" \
+	"\t  When this option is specified LaTe will check if the specified .csv file already exists. If yes,\n" \
 	"\t  it will try to create a new file with name <filename>_0001.csv. If also this file is already existing\n" \
     "\t  it will try to create <filename>_0002.csv, and so on, until 9999 attemps are performed. When all the\n" \
     "\t  available attempts have been performed, it will simply append to <filename>.csv.\n" \
