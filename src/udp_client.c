@@ -1110,13 +1110,15 @@ unsigned int runUDPclient(struct lampsock_data sData, struct options *opts) {
 		}
 	}
 
-	if(t_rx_error!=ERR_REPORT_TIMEOUT && t_rx_error!=NO_ERR) {
-		/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
-		with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
-		fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
-		// Print the statistics, if no error, before returning
-		reportStructureFinalize(&reportData);
-		printStats(&reportData,stdout,opts->confidenceIntervalMask);
+	if(opts->log_init_failures==0 || (opts->log_init_failures==1 && t_rx_error!=ERR_TIMEOUT_ACK)) {
+		if(t_rx_error!=ERR_REPORT_TIMEOUT) {
+			/* Ok, the mode_ub==UNSET_UB case is not managed, but it should never happen to reach this point
+			with an unset mode... at least not without getting errors or a chaotic thread behaviour! But it should not happen anyways. */
+			fprintf(stdout,opts->mode_ub==PINGLIKE?"Ping-like ":"Unidirectional " "statistics:\n");
+			// Print the statistics, if no error, before returning
+			reportStructureFinalize(&reportData);
+			printStats(&reportData,stdout,opts->confidenceIntervalMask);
+		}
 	}
 
 	if(opts->filename!=NULL) {
