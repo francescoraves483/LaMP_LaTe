@@ -242,6 +242,9 @@ struct options {
 
 	// Specified through -z (-z will automatically create a -i value, just before starting the timer, in order to finish at the specified time)
 	int32_t seconds_to_end;
+
+	int udp_forced_src_port; // '-1' means that the option has not been specified, i.e. let the OS choose a client UDP source port
+	int udp_forced_dst_port; // '-1' means that the option has not been specified, i.e. let the server use as UDP destination port the one received as UDP source port from the client
 };
 
 void options_initialize(struct options *options);

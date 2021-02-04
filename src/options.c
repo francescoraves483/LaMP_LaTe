@@ -73,6 +73,8 @@
 
 #define LONGOPT_initial_timeout "initial-timeout"
 #define LONGOPT_log_init_failures "log-init-failures"
+#define LONGOPT_udp_force_src_port "udp-force-src-port"
+#define LONGOPT_udp_force_dst_port "udp-force-dst-port"
 
 #define LONGOPT_t_client "interval"
 #define LONGOPT_t_server "server-timeout"
@@ -80,6 +82,8 @@
 #define LONGOPT_t_server_val 257
 #define LONGOPT_initial_timeout_server_val 258
 #define LONGOPT_log_init_failures_client_val 259
+#define LONGOPT_udp_force_src_port_val 260
+#define LONGOPT_udp_force_dst_port_val 261
 
 #define LONGOPT_STR_CONSTRUCTOR(LONGOPT_STR) "  --"LONGOPT_STR"\n"
 
@@ -98,6 +102,8 @@ static const struct option late_long_opts[]={
 	{LONGOPT_t_server,	required_argument, 	NULL, LONGOPT_t_server_val},
 	{LONGOPT_initial_timeout, no_argument, NULL, LONGOPT_initial_timeout_server_val},
 	{LONGOPT_log_init_failures, no_argument, NULL, LONGOPT_log_init_failures_client_val},
+	{LONGOPT_udp_force_src_port,	required_argument, 	NULL, LONGOPT_udp_force_src_port_val},
+	{LONGOPT_udp_force_dst_port,	required_argument, 	NULL, LONGOPT_udp_force_dst_port_val},
 	{LONGOPT_z,			required_argument,	NULL, 'z'},
 	{LONGOPT_A,			required_argument,	NULL, 'A'},
 	{LONGOPT_C,			required_argument,	NULL, 'C'},
@@ -422,6 +428,16 @@ static const struct option late_long_opts[]={
 	"\t   and server, is to leave the CSV file untouched, without adding any line related to a failed test.\n" \
 	"\t   This option is client-only and can be selected only together with -f or --"LONGOPT_f".\n"
 
+#define OPT_udp_force_src_port \
+	"  --"LONGOPT_udp_force_src_port" <port number>: this option can be used to force the client to choose a specific UDP source port\n" \
+	"\t   instead of letting the OS choose one at random.\n" \
+	"\t   This option is client-only and it can only be used with non-raw sockets.\n"
+
+#define OPT_udp_force_dst_port \
+	"  --"LONGOPT_udp_force_dst_port" <port number>: this option can be used to force the server to use a specific UDP destination port,\n" \
+	"\t   different than the one contained as source port in the packets received from the client.\n" \
+	"\t   This option is server-only and it can only be used with non-raw sockets.\n"
+
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
 // Safer implementation of strchr for the -w option, reading up to the maximum expected number of characters in -w (i.e. MAX_w_STRING_SIZE)
@@ -582,6 +598,7 @@ static void print_long_info(void) {
 			OPT_T_client
 			OPT_V_both
 			OPT_log_init_failures_client
+			OPT_udp_force_src_port
 
 			// File options
 			OPT_f_client
@@ -631,6 +648,7 @@ static void print_long_info(void) {
 			OPT_0_server
 			OPT_1_server
 			OPT_initial_timeout_server
+			OPT_udp_force_dst_port
 
 			// File options
 			OPT_g_both
@@ -792,6 +810,9 @@ void options_initialize(struct options *options) {
 	options->dup_detect_enabled=1;
 
 	options->seconds_to_end=-1;
+
+	options->udp_forced_src_port=-1;
+	options->udp_forced_dst_port=-1;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -1495,6 +1516,32 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				options->log_init_failures=1;
 				break;
 
+			case LONGOPT_udp_force_src_port_val:
+				errno=0; // Setting errno to 0 as suggested in the strtol() man page
+				options->udp_forced_src_port=strtoul(optarg,&sPtr,0);
+
+				if(sPtr==optarg) {
+					fprintf(stderr,"Cannot find any digit in the specified UDP source port.\n");
+					print_short_info_err(options);
+				} else if(errno || options->udp_forced_src_port<1 || options->udp_forced_src_port>65535) {
+					fprintf(stderr,"Error in parsing the UDP source port.\n");
+					print_short_info_err(options);
+				}
+				break;
+
+			case LONGOPT_udp_force_dst_port_val:
+				errno=0; // Setting errno to 0 as suggested in the strtol() man page
+				options->udp_forced_dst_port=strtoul(optarg,&sPtr,0);
+
+				if(sPtr==optarg) {
+					fprintf(stderr,"Cannot find any digit in the specified UDP destination port.\n");
+					print_short_info_err(options);
+				} else if(errno || options->udp_forced_dst_port<1 || options->udp_forced_dst_port>65535) {
+					fprintf(stderr,"Error in parsing the UDP destination port.\n");
+					print_short_info_err(options);
+				}
+				break;
+
 			default:
 				print_short_info_err(options);
 
@@ -1716,8 +1763,23 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 	#endif
 
 	if(options->log_init_failures==1 && options->filename==NULL) {
-			fprintf(stderr,"Error: --"LONGOPT_log_init_failures" can only be specified together with -f or --"LONGOPT_f".\n");
-			print_short_info_err(options);
+		fprintf(stderr,"Error: --"LONGOPT_log_init_failures" can only be specified together with -f or --"LONGOPT_f".\n");
+		print_short_info_err(options);
+	}
+
+	if(options->udp_forced_src_port!=-1 && (options->mode_cs==SERVER || options->mode_cs==LOOPBACK_SERVER)) {
+		fprintf(stderr,"Error: --"LONGOPT_udp_force_src_port" is a client-only option.\n");
+		print_short_info_err(options);
+	}
+
+	if(options->udp_forced_dst_port!=-1 && (options->mode_cs==CLIENT || options->mode_cs==LOOPBACK_CLIENT)) {
+		fprintf(stderr,"Error: --"LONGOPT_udp_force_dst_port" is a server-only option.\n");
+		print_short_info_err(options);
+	}
+
+	if((options->udp_forced_dst_port!=-1 || options->udp_forced_src_port!=-1) && options->mode_raw==RAW) {
+		fprintf(stderr,"Error: --"LONGOPT_udp_force_src_port" and "LONGOPT_udp_force_dst_port" cannot be specified when RAW sockets are used.\n");
+		print_short_info_err(options);
 	}
 
 	// -i and -z cannot be specified together
@@ -1793,7 +1855,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 	// Important note: when adding futher protocols that cannot support, somehow, raw sockets, always check for -r not being set
 
-	// When -g is used, forbid too large flush intervals (i.e. intervals in which the could be more than one cyclical sequence numbers reset - with some margin)
+	// When -g is used, forbid too large flush intervals (i.e. intervals in which there could be more than one cyclical sequence numbers reset - with some margin)
 	if(options->carbon_sock_params.enabled && options->carbon_interval>=(unsigned int)(options->interval*((double)UINT16_MAX/2000.0))) {
 		fprintf(stderr,"Error: the flush interval is too large."
 			"Specified value: %u s - Maximum value for the current periodicity: %u s\n",

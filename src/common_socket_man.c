@@ -226,7 +226,7 @@ int socketOpen(protocol_t protocol,struct lampsock_data *sData,struct options *o
 			sData->addru.addrin[0].sin_family=AF_INET;
 
 			if(opts->mode_cs==CLIENT || opts->mode_cs==LOOPBACK_CLIENT) {
-				sData->addru.addrin[0].sin_port=0;
+				sData->addru.addrin[0].sin_port=opts->udp_forced_src_port == -1 ? 0 : htons(opts->udp_forced_src_port);
 			} else if(opts->mode_cs==SERVER || opts->mode_cs==LOOPBACK_SERVER) {
 				sData->addru.addrin[0].sin_port=htons(opts->port);
 			}

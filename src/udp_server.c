@@ -47,7 +47,7 @@ static pthread_mutex_t ack_report_received_mut;
 static int transmitReportUDP(struct lampsock_data sData, struct options *opts);
 extern inline int timevalSub(struct timeval *in, struct timeval *out);
 static uint8_t ackSenderInit(arg_struct_udp *args);
-static uint8_t initReceiver(struct lampsock_data *sData, uint64_t interval);
+static uint8_t initReceiver(struct lampsock_data *sData, uint64_t interval, int udp_forced_dst_port);
 
 // Thread entry point functions
 static void *ackListenerUDP(void *arg);
@@ -97,7 +97,7 @@ static uint8_t ackSenderInit(arg_struct_udp *args) {
 	return 0;
 }
 
-static uint8_t initReceiver(struct lampsock_data *sData, uint64_t interval) {
+static uint8_t initReceiver(struct lampsock_data *sData, uint64_t interval, int udp_forced_dst_port) {
 	controlRCVdata rcvData;
 	uint8_t return_val=0;
 	int controlRcvRetValue;
@@ -128,7 +128,9 @@ static uint8_t initReceiver(struct lampsock_data *sData, uint64_t interval) {
 		// Set destination address inside the sendto sockaddr_in structure
 		sData->addru.addrin[1].sin_addr.s_addr=rcvData.controlRCV.ip.s_addr;
 		// Set the destination port inside the sendto sockaddr_in structure
-		sData->addru.addrin[1].sin_port=rcvData.controlRCV.port;
+		// If the udp-force-dst-port option is specified, force a UDP destination port, otherwise use the client source port
+		// as destination port
+		sData->addru.addrin[1].sin_port=udp_forced_dst_port == -1 ? rcvData.controlRCV.port : htons(udp_forced_dst_port);
 
 		lamp_id_session=rcvData.controlRCV.session_id;
 
@@ -376,7 +378,7 @@ unsigned int runUDPserver(struct lampsock_data sData, struct options *opts) {
 	sData.addru.addrin[1].sin_family=AF_INET;
 
 	// Perform INIT procedure
-	if(initReceiver(&sData, opts->interval)) {
+	if(initReceiver(&sData,opts->interval,opts->udp_forced_dst_port)) {
 		thread_error_print("UDP server INIT receiver loop", t_rx_error);
 		CLEAR_ALL()
 		return 1;
