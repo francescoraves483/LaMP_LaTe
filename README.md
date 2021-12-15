@@ -40,8 +40,8 @@ Please note that in order to compile Qpid Proton on Android, you may need to man
 Clone this repository (`--recursive` is needed in order to clone the Rawsock library submodule too):
 ```
 git clone --recursive https://github.com/francescoraves483/LaMP_LaTe.git
-git checkout development --recurse-submodules
 cd LaMP_LaTe
+git checkout development --recurse-submodules
 ```
 Compile:
 ```

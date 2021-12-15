@@ -34,13 +34,13 @@ static t_error_types t_rx_error=NO_ERR;
 // When in HARDWARE/SOFTWARE mode, a structure to store the tx timestamps is needed
 // Using timevalStoreList, as defined in timeval_utils.h
 // This structure will be allocated only if HARDWARE/SOFTWARE mode is properly supported 
-timevalStoreList tslist;
+static timevalStoreList tslist;
 
 // The same applies for the following list, used to store temporary trip times (as timestamp differences)
 // when waiting for the server follow-ups, containing an estimate on the time needed
 // to process each client request and send the reply down to the hardware
 // This list is allocated only when the follow-up mode is active
-timevalStoreList triptimelist;
+static timevalStoreList triptimelist;
 
 // Mutex to protect tslist, as defined before
 static pthread_mutex_t tslist_mut=PTHREAD_MUTEX_INITIALIZER;
