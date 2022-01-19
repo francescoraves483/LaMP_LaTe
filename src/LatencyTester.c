@@ -88,6 +88,11 @@ int main (int argc, char **argv) {
 		fprintf(stdout,"\nThe program will work on the interface: %s (index: %x).\n\n",
 			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.devname : "(any)",
 			opts.nonwlan_mode!=NONWLAN_MODE_ANY ? sData.ifindex : 0);
+
+		if(opts.nonwlan_mode==NONWLAN_MODE_FORCED_IP) {
+			fprintf(stdout,"The program is bound to IP address: %s\n\n",
+				inet_ntoa(opts.opt_ipaddr));
+		}
 	}
 
 	do {

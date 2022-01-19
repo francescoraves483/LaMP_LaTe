@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <poll.h>
 #include <unistd.h>
+#include <ifaddrs.h>
 
 int socketCreator(protocol_t protocol) {
 	int sFd;
@@ -101,6 +102,37 @@ int socketDataSetup(protocol_t protocol,struct lampsock_data *sData,struct optio
 				return 0;
 			}
 
+			break;
+
+		case NONWLAN_MODE_FORCED_IP:
+			{
+			if(opts->mode_raw==RAW) {
+				fprintf(stderr,"Error: you requested to bind to a specific IP address, but this is not supported\n"
+					"for raw sockets (which are used to send packets which are typically not IP-based).\n");
+				return 0;
+			}
+
+			// Get the interface name and index, given the IP address
+			struct ifaddrs *ifinfo, *ifit;
+			getifaddrs(&ifinfo);
+
+			for(ifit=ifinfo;ifit!=NULL;ifit=ifit->ifa_next) {
+				if(ifit->ifa_addr!=NULL && ifit->ifa_addr->sa_family==AF_INET) {
+					if(((struct sockaddr_in *)ifit->ifa_addr)->sin_addr.s_addr==opts->opt_ipaddr.s_addr) {
+						strncpy(sData->devname,ifit->ifa_name,IFNAMSIZ);
+						sData->ifindex=if_nametoindex(sData->devname);
+						break;
+					}
+				}
+			}
+
+			if(ifit==NULL) {
+				fprintf(stderr,"Error: could not find an interface name and index for IP: %s\n",
+					inet_ntoa(opts->opt_ipaddr));
+				return 0;
+			}
+
+			}
 			break;
 
 		case NONWLAN_MODE_FORCED_NAME:
@@ -231,10 +263,13 @@ int socketOpen(protocol_t protocol,struct lampsock_data *sData,struct options *o
 				sData->addru.addrin[0].sin_port=htons(opts->port);
 			}
 
-			if(opts->nonwlan_mode!=NONWLAN_MODE_ANY) {
+			if(opts->nonwlan_mode!=NONWLAN_MODE_ANY && opts->nonwlan_mode!=NONWLAN_MODE_FORCED_IP) {
 				sData->addru.addrin[0].sin_addr.s_addr=addressesptr->srcIPaddr.s_addr;
-			} else {
+			} else if(opts->nonwlan_mode!=NONWLAN_MODE_FORCED_IP) {
 				sData->addru.addrin[0].sin_addr.s_addr=INADDR_ANY;
+			} else {
+				// opts->nonwlan_mode==NONWLAN_MODE_FORCED_IP
+				sData->addru.addrin[0].sin_addr.s_addr=opts->opt_ipaddr.s_addr;
 			}
 
 			// Bind to the specified interface

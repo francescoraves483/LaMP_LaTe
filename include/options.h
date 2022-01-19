@@ -74,6 +74,7 @@
 #define NONWLAN_MODE_WIRED 1
 #define NONWLAN_MODE_ANY 2
 #define NONWLAN_MODE_FORCED_NAME 3
+#define NONWLAN_MODE_FORCED_IP 4
 
 // Exponential distribution random interval maximum allowed factor (periodicities larger than this value * mean will be discarded
 // and a new periodicity value will be extracted)
@@ -185,6 +186,7 @@ struct options {
 	uint8_t overwrite; // In '-f' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not append to existing file), otherwise it will be = 0 (default = 0)
 	uint8_t overwrite_W; // In '-W' mode, overwrite will be = 1 if '-o' is specified (overwrite and do not create new files when a CSV file already exists), otherwise it will be = 0 (default = 0)
 	char *opt_devname; // Interface name for the -S mode
+	struct in_addr opt_ipaddr; // IP address to bind to for the --bind-to-ip mode
 	uint8_t dmode; // Set with '-d': = 1 if continuous server mode is selected, = 0 otherwise (default = 0)
 	char latencyType; // Set with the option '-L': can be 'u' (user-to-user, gettimeofday() - default), 'r' (KRT, gettimeofday()+ancillary data), 'h' (hardware timestamps when supported)
 	uint8_t nonwlan_mode; // = 0 if the program should bind to wireless interfaces, = 1 otherwise, = 2 if binding to any local interface (default: 0)

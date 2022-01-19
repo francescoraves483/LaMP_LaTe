@@ -75,6 +75,7 @@
 #define LONGOPT_log_init_failures "log-init-failures"
 #define LONGOPT_udp_force_src_port "udp-force-src-port"
 #define LONGOPT_udp_force_dst_port "udp-force-dst-port"
+#define LONGOPT_bind_to_ip "bind-to-ip"
 
 #define LONGOPT_t_client "interval"
 #define LONGOPT_t_server "server-timeout"
@@ -84,6 +85,7 @@
 #define LONGOPT_log_init_failures_client_val 259
 #define LONGOPT_udp_force_src_port_val 260
 #define LONGOPT_udp_force_dst_port_val 261
+#define LONGOPT_bind_to_ip_val 262
 
 #define LONGOPT_STR_CONSTRUCTOR(LONGOPT_STR) "  --"LONGOPT_STR"\n"
 
@@ -125,6 +127,7 @@ static const struct option late_long_opts[]={
 	{LONGOPT_I, 		required_argument,	NULL, 'I'},
 	{LONGOPT_N, 		no_argument,		NULL, 'N'},
 	{LONGOPT_S,			required_argument,	NULL, 'S'},
+	{LONGOPT_bind_to_ip,	required_argument, NULL, LONGOPT_bind_to_ip_val},
 
 	// AMQP 1.0 only
 	#if AMQP_1_0_ENABLED
@@ -438,6 +441,11 @@ static const struct option late_long_opts[]={
 	"\t   different than the one contained as source port in the packets received from the client.\n" \
 	"\t   This option is server-only and it can only be used with non-raw sockets.\n"
 
+#define OPT_bind_to_ip_both \
+	"  --"LONGOPT_bind_to_ip" <IP address>: this option can be used to bind to a specific IP address, instead of specifying an\n" \
+	"\t   interface name (-S) or internal index (-I). This option can be useful when IP aliases are in use on a single interface.\n" \
+	"\t   This option is incompatible with all the other interface options. Non raw sockets only.\n"
+
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
 // Safer implementation of strchr for the -w option, reading up to the maximum expected number of characters in -w (i.e. MAX_w_STRING_SIZE)
@@ -625,6 +633,10 @@ static void print_long_info(void) {
 			#if AMQP_1_0_ENABLED
 			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 			#endif
+			OPT_bind_to_ip_both
+			#if AMQP_1_0_ENABLED
+			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+			#endif
 			"\n"
 
 		"[options] - Mandatory server options:\n"
@@ -671,6 +683,10 @@ static void print_long_info(void) {
 			#endif
 			OPT_N_both
 			OPT_S_both
+			#if AMQP_1_0_ENABLED
+			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
+			#endif
+			OPT_bind_to_ip_both
 			#if AMQP_1_0_ENABLED
 			"\t  This option cannot be used for AMQP 1.0 as we have no control over the binding mechanism of Qpid Proton.\n"
 			#endif
@@ -758,6 +774,7 @@ void options_initialize(struct options *options) {
 	options->overwrite_W=0;
 
 	options->opt_devname=NULL;
+	options->opt_ipaddr.s_addr=0x00000000;
 
 	options->dmode=0;
 
@@ -1363,7 +1380,7 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				int opt_devnameLen=0;
 
 				if(options->nonwlan_mode!=NONWLAN_MODE_WIRELESS) {
-					fprintf(stderr,"Error when selecting -S: -e/-I or -N was already specified.\nPlease specify only one option between -e/-I, -N or -S.\n");
+					fprintf(stderr,"Error when selecting -S: -e/-I, -N or --bind-to-ip was already specified.\nPlease specify only one option between -e/-I, -N, -S or --bind-to-ip.\n");
 					print_short_info_err(options);
 				}
 
@@ -1384,6 +1401,21 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				options->nonwlan_mode=NONWLAN_MODE_FORCED_NAME;
 
 				}
+				break;
+
+			case LONGOPT_bind_to_ip_val:
+				if(options->nonwlan_mode!=NONWLAN_MODE_WIRELESS) {
+					fprintf(stderr,"Error when selecting --bind-to-ip: -e/-I, -S or -N was already specified.\nPlease specify only one option between -e/-I, -N, -S or --bind-to-ip.\n");
+					print_short_info_err(options);
+				}
+
+				if(inet_pton(AF_INET,optarg,&options->opt_ipaddr)!=1) {
+					fprintf(stderr,"Error in parsing the IP address to bind to.\n");
+					print_short_info_err(options);
+				}
+
+				options->nonwlan_mode=NONWLAN_MODE_FORCED_IP;
+
 				break;
 
 			case 'U':
