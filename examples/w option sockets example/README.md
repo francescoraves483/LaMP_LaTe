@@ -1,6 +1,6 @@
 **Python 3 example application receiving data through the LaTe -w option**
 
-This Python 3 code represents an example of application which receives data through two parallel sockets (a TCP socket and a UDP socket) which are opened when the *-w* option, in LaTe (starting from version *0.1.6-beta, 20200511e*) is specified.
+This Python 3 code (`LaTe_w_option_sample_application.py`) represents an example of application which receives data through two parallel sockets (a TCP socket and a UDP socket) which are opened when the *-w* option, in LaTe (starting from version *0.1.6-beta, 20200511e*) is specified.
 
 This simple example, even though we tried to made it as complete as possibile, including some error handling, limits itself to printing the received information, but it can be used as a base to build more complex applications, using Python but also other programming languages.
 
@@ -65,3 +65,6 @@ For instance, to receive packets over the loopback interface on port 46001:
 ```
 python3 LaTe_w_option_sample_application.py -a 127.0.0.1:46010
 ```
+
+A more complex example, which is also able to receive data from a GNSS device (thanks to a running `gpsd` service) and print synchronized position and latency information, is available in `LaTe_w_option_sample_application_with_distance.py`. This script accepts a few more options, which are detailed in the `print_short_info_and_exit` function (line 281).
+This example requires three additional libraries with respect to the base sample Python code, i.e., `gpsd-py3`, `geographiclib` and `pathlib`. You can install these libraries with `pip3 install <library name>`.
