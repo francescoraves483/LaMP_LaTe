@@ -2,6 +2,8 @@ EXECNAME=LaTe
 EXECNAME_FULL=LaTe-full
 
 CC_EMBEDDED=x86_64-openwrt-linux-musl-gcc
+EMBEDDED_DISTRO_MAIN_DIR=/mnt/xtra/OpenWrt-V2X
+EMBEDDED_TARGET=target-x86_64_musl
 
 SRC_DIR=src
 OBJ_DIR=obj
@@ -39,6 +41,7 @@ all: compilePC
 
 compilePC: CC = gcc
 compileAPU: CC = $(CC_EMBEDDED)
+compileAPU: LDLIBS += -L$(EMBEDDED_DISTRO_MAIN_DIR)/staging_dir/$(EMBEDDED_TARGET)/usr/lib
 	
 compilePCdebug: CFLAGS += -g
 compilePCdebug: compilePC
