@@ -610,7 +610,7 @@ static void *rxLoop_t (void *arg) {
 
 	// Open CSV file when in "-W" mode (i.e. "write every packet measurement data to CSV file")
 	if(args->opts->Wfilename!=NULL) {
-		Wfiledescriptor=openTfile(args->opts->Wfilename,args->opts->overwrite_W,args->opts->followup_mode!=FOLLOWUP_OFF,args->opts->report_extra_data);
+		Wfiledescriptor=openTfile(args->opts->Wfilename,args->opts->overwrite_W,args->opts->followup_mode!=FOLLOWUP_OFF,args->opts->report_extra_data,args->opts->nonwlan_mode);
 		if(Wfiledescriptor<0) {
 			fprintf(stderr,"Warning! Cannot open file for writing single packet latency data.\nThe '-W' option will be disabled.\n");
 		}
@@ -790,7 +790,7 @@ static void *rxLoop_t (void *arg) {
 				perPktData.tx_timestamp=tx_timestamp;
 
 				if(Wfiledescriptor>0) {
-					writeToTFile(Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
+					writeToTFile(args->opts,Wfiledescriptor,W_DECIMAL_DIGITS,&perPktData);
 				}
 
 				if(args->opts->udp_params.enabled) {

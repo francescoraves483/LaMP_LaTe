@@ -686,7 +686,7 @@ int printStatsSocket(struct options *opts, reportStructure *report, report_sock_
 	return 0;
 }
 
-int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data) {
+int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data, uint8_t nonwlan_mode) {
 	int csvfd;
 	char *Tfilename_fileno;
 
@@ -765,6 +765,11 @@ int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, ch
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_N)) {
 		dprintf(csvfd,",Current maximum");
+	}
+
+	// This can be added only if the interface is a wireless interface
+	if(nonwlan_mode==NONWLAN_MODE_WIRELESS && CHECK_REPORT_EXTRA_DATA_BIT_SET(enabled_extra_data,CHAR_S)) {
+		dprintf(csvfd,",RSSI");
 	}
 
 	dprintf(csvfd,"\n");
@@ -854,11 +859,12 @@ int openReportSocket(report_sock_data_t *sock_data,struct options *opts) {
 }
 
 // When printing additional data with -X, this function shall always be called after updating the report with "reportStructureUpdate()"
-int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData) {
+int writeToTFile(struct options *opts,int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData) {
 	int dprintf_ret_val;
 	// "PER Till Now" (Packet Error Rate till now) is basically computed as the percentage packet loss over all the packets before the last one
 	double perTillNow;
 	uint64_t reconstructedSeqNo;
+	static bool nl_sock_disabled = false;
 
 	if(perPktData->followup_on_flag==0) {
 		dprintf_ret_val=dprintf(Tfiledescriptor,"%" PRIu64 ",%.*f,%ld.%06ld,%d",
@@ -893,8 +899,47 @@ int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *
 	}
 
 	if(CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_N)) {
-		// perPktData->reportDataPointer->minLatency contains the current minimum measured latency (at the end of the test will contain the global test minimum)
+		// perPktData->reportDataPointer->maxLatency contains the current maximum measured latency (at the end of the test will contain the global test maximum)
 		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.*f",decimal_digits,compute_maxLatency(perPktData));
+	}
+
+	// This information should be added only when using wireless interfaces
+	if(opts->nonwlan_mode==NONWLAN_MODE_WIRELESS && CHECK_REPORT_EXTRA_DATA_BIT_SET(perPktData->enabled_extra_data,CHAR_S)) {
+		// Get the RSSI from netlink
+		// First, open a Netlink socket if it is not already open
+		if(!nl_sock_disabled && opts->opts_nl_sock_info.sock_valid==0) {
+			// Get the interface name
+			char devname[IFNAMSIZ];
+			memset(devname,0,IFNAMSIZ*sizeof(char));
+
+			rawsockerr_t ret_wlanl_val=wlanLookup(devname,NULL,NULL,NULL,opts->if_index,opts->nonwlan_mode);
+			if(ret_wlanl_val<=0) {
+				fprintf(stderr,"Error: cannot retrieve interface name for opening the netlink socket. RSSI values will be all unavailable. Details:\n");
+				rs_printerror(stderr,ret_wlanl_val);
+				nl_sock_disabled=1;
+			}
+
+			if(!nl_sock_disabled) {
+				opts->opts_nl_sock_info=open_nl_socket(devname);
+
+				if(opts->opts_nl_sock_info.sock_valid==0) {
+					fprintf(stderr,"Error: cannot open netlink socket. RSSI values will be all unavailable.\nDetails: %s\n",strerror(errno));
+					nl_sock_disabled=1;
+				}
+			}
+		}
+
+		// If a valid Netlink socket has been opened and a valid reference MAC has been specified, retrieve the RSSI via nl80211
+		// RSSI will remain to RSSI_UNAVAILABLE in case of socket unavailable or reference MAC address not specified
+		double rssi = RSSI_UNAVAILABLE;
+		if(!nl_sock_disabled && opts->opts_nl_sock_info.sock_valid==1 &&
+			opts->referencemacaddr[0]!=0x00 && opts->referencemacaddr[1]!=0x00 &&
+			opts->referencemacaddr[2]!=0x00 && opts->referencemacaddr[3]!=0x00 &&
+			opts->referencemacaddr[4]!=0x00 && opts->referencemacaddr[5]!=0x00) {
+			rssi = get_rssi_from_netlink(opts->referencemacaddr,opts->opts_nl_sock_info);
+		}
+
+		dprintf_ret_val+=dprintf(Tfiledescriptor,",%.1lf",rssi);
 	}
 
 	dprintf_ret_val+=dprintf(Tfiledescriptor,"\n");

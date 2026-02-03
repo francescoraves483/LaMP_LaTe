@@ -13,3 +13,6 @@ nohup.out
 
 # Any CSV log file that could be present in the main LaTe directory
 *.csv
+
+# CLion project files
+.idea/

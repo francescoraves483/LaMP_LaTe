@@ -6,14 +6,15 @@
 #include <netinet/in.h>
 #include "rawsock_lamp.h" // In order to import the definition of protocol_t
 #include "math_utils.h"
+#include "nl_utils.h"
 
 // Valid options
 // Any new option should be handled in the switch-case inside parse_options() and the corresponding char should be added to VALID_OPTS
 // If an option accepts an additional argument, it is followed by ':'
 #if !AMQP_1_0_ENABLED
-#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:i:z:X:A:BC:DFM:NP:R:S:UVL:I:W:T:01"
+#define VALID_OPTS "hust:n:c:df:svlmoyp:rew:g:i:z:X:A:BC:DFM:NP:R:S:UVL:I:W:T:012:"
 #else 
-#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:i:z:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:01"
+#define VALID_OPTS "huat:n:c:df:svlmoyp:rew:g:i:z:q:X:A:BC:DFM:NP:R:S:UVL:I:W:T:H:012:"
 #endif
 
 #if !AMQP_1_0_ENABLED
@@ -111,6 +112,7 @@
 #define CHAR_R 2
 #define CHAR_M 3
 #define CHAR_N 4
+#define CHAR_S 5
 
 // Utility macros to set and check the report_extra_data field's bit, enabling or disabling the printing of extra information to -W CSV files
 #define SET_REPORT_EXTRA_DATA_BIT(report_extra_data,char_macro) (report_extra_data |= 1UL << char_macro)
@@ -118,7 +120,7 @@
 #define CHECK_REPORT_EXTRA_DATA_BIT_SET(report_extra_data,char_macro) ((report_extra_data >> char_macro) & 1U)
 
 // Macro to check if report extra_data has a correct value
-#define REPORT_IS_REPORT_EXTRA_DATA_OK(enabled_extra_data) (enabled_extra_data=='a' || enabled_extra_data=='p' || enabled_extra_data=='r')
+#define REPORT_IS_REPORT_EXTRA_DATA_OK(enabled_extra_data) (enabled_extra_data=='a' || enabled_extra_data=='p' || enabled_extra_data=='r' || enabled_extra_data=='s')
 
 // This value should be set to the number of bits in the type of "report_extra_data"
 #define REPORT_EXTRA_DATA_BIT_SIZE 16
@@ -207,6 +209,7 @@ struct options {
 
 	unsigned long port;
 	uint8_t destmacaddr[6];
+	uint8_t referencemacaddr[6]; // This is used only for RSSI retrieval when -X is specified together with the 's' character
 
 	#if AMQP_1_0_ENABLED
 	char portStr[MAX_PORT_STR_SIZE]; // This is defined and used only when AMQP 1.0 is enabled
@@ -221,7 +224,7 @@ struct options {
 	// Report extra data to be printed to -W CSV files only when explicitely requested
 	// It is saved as a set of bits (up to 16), which enable a certain extra information to be printed
 	// The bits meaning is (where "res"="reserved" and the character is the one toggling that bit/information with -X):
-	// (res) (res) (res) (res) (res) (res) (res) (res) (res) (res) (res) ('n') ('m') ('r') ('p')
+	// (res) (res) (res) (res) (res) (res) (res) (res) (res) (res) ('s') ('n') ('m') ('r') ('p')
 	// -X a will set all the bits to 1
 	// All the reserved bits are ignored, no matter the value they assume
 	uint16_t report_extra_data;
@@ -247,6 +250,9 @@ struct options {
 
 	int udp_forced_src_port; // '-1' means that the option has not been specified, i.e. let the OS choose a client UDP source port
 	int udp_forced_dst_port; // '-1' means that the option has not been specified, i.e. let the server use as UDP destination port the one received as UDP source port from the client
+
+	// Netlink socket data for RSSI retrieval (used only when -X s is specified)
+	nl_sock_info_t opts_nl_sock_info;
 };
 
 void options_initialize(struct options *options);

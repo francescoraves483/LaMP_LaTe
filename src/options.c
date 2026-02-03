@@ -60,6 +60,7 @@
 #define LONGOPT_d "daemon"
 #define LONGOPT_0 "no-follow-up"
 #define LONGOPT_1 "print-after"
+#define LONGOPT_2 "reference-RSSI-MAC"
 #define LONGOPT_h "help"
 #define LONGOPT_v "version"
 #define LONGOPT_u "udp"
@@ -138,6 +139,7 @@ static const struct option late_long_opts[]={
 	{LONGOPT_d,			no_argument,		NULL, 'd'},
 	{LONGOPT_0,			no_argument,		NULL, '0'},
 	{LONGOPT_1,			no_argument,		NULL, '1'},
+	{LONGOPT_2,			required_argument,	NULL, '2'},
 
 	// Information options
 	{LONGOPT_h,			no_argument,		NULL, 'h'},
@@ -346,9 +348,11 @@ static const struct option late_long_opts[]={
 	"  -X <chars>: when -W/-w is specified, it is possible to print extra single packet information by specifying some characters\n" \
 	"\t  after -X. In particular, 'p' will print a Packet Error Rate considering all the packets before the current one,\n" \
 	"\t  'r' will print reconstructed non cyclical sequence numbers (i.e. monotonic increasing sequence numbers even\n" \
-	"\t  when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value .\n" \
-	"\t  up to the current packet and 'n' will print the minimum measured value up to the current packet.\n" \
+	"\t  when LaMP sequence numbers are cyclically reset between 65535, 'm' will print the maximum measured value\n" \
+	"\t  up to the current packet, 'n' will print the minimum measured value up to the current packet and\n" \
+	"\t  's' will try to retrieve and log the current RSSI when a wireless 802.11 interface is used.\n" \
 	"\t  'a' can be used as a shortcut to print all the available information.\n" \
+	"\t  The 's' character is valid only for -W and will be ignored for -w.\n" \
 	"\t  This option is valid only when -W or -w (or both) is selected.\n"
 
 #if AMQP_1_0_ENABLED
@@ -378,6 +382,9 @@ static const struct option late_long_opts[]={
 	"  -1: force printing that a packet was received after sending the corresponding reply, instead of as soon as\n" \
 	"\t  a packet is received from the client; this can help reducing the server processing time a bit as no\n" \
 	"\t  'printf' is called before sending a reply.\n"
+#define OPT_2_both \
+	LONGOPT_STR_CONSTRUCTOR(LONGOPT_2) \
+	"  -2: specify a MAC address for RSSI retrieval. Used only when the 's' flag is specified after -X.\n"
 #define OPT_g_both \
 	LONGOPT_STR_CONSTRUCTOR(LONGOPT_g) \
 	"  -g <options string>: send metrics to Carbon/Graphite (see https://graphiteapp.org/ for more information).\n" \
@@ -443,8 +450,8 @@ static const struct option late_long_opts[]={
 
 #define OPT_bind_to_ip_both \
 	"  --"LONGOPT_bind_to_ip" <IP address>: this option can be used to bind to a specific IP address, instead of specifying an\n" \
-	"\t   interface name (-S) or internal index (-I). This option can be useful when IP aliases are in use on a single interface.\n" \
-	"\t   This option is incompatible with all the other interface options. Non raw sockets only.\n"
+	"\t   interface name (-S) or internal index (-I). This option can be useful when IP aliases are in use on a\n" \
+	"\t   single interface. This option is incompatible with all the other interface options. Non raw sockets only.\n"
 
 static const char *latencyTypes[]={"Unknown","User-to-user","KRT","Software (kernel) timestamps","Hardware timestamps"};
 
@@ -621,6 +628,7 @@ static void print_long_info(void) {
 			OPT_W_both
 			"\t  This options applies to a client only in ping-like mode.\n"
 			OPT_X_both
+			OPT_2_both
 
 			// Interface options
 			OPT_e_both
@@ -674,6 +682,7 @@ static void print_long_info(void) {
 			OPT_W_both
 			"\t  This options applies to a server only in unidirectional mode.\n"
 			OPT_X_both
+			OPT_2_both
 
 			// Interface options
 			OPT_e_both
@@ -765,6 +774,7 @@ void options_initialize(struct options *options) {
 
 	for(i=0;i<6;i++) {
 		options->destmacaddr[i]=0x00;
+		options->referencemacaddr[i]=0x00;
 	}
 
 	options->mode_raw=NON_RAW; // NON_RAW mode is selected by default
@@ -830,6 +840,8 @@ void options_initialize(struct options *options) {
 
 	options->udp_forced_src_port=-1;
 	options->udp_forced_dst_port=-1;
+
+	options->opts_nl_sock_info.sock_valid = 0;
 }
 
 unsigned int parse_options(int argc, char **argv, struct options *options) {
@@ -1225,28 +1237,34 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 					for(int i=0;i<optargLen;i++) {
 						if(optarg[i]=='p') {
 							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_P)) {
-								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'p');
+								fprintf(stderr,"Warning: specified character '%c' after -X, but it was already selected.\n",'p');
 							}
 
 							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_P);
 						} else if(optarg[i]=='r') {
 							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_R)) {
-								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'r');
+								fprintf(stderr,"Warning: specified character '%c' after -X, but it was already selected.\n",'r');
 							}
 
 							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_R);
 						} else if(optarg[i]=='m') {
 							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_M)) {
-								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'m');
+								fprintf(stderr,"Warning: specified character '%c' after -X, but it was already selected.\n",'m');
 							}
 
 							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_M);
 						} else if(optarg[i]=='n') {
 							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_N)) {
-								fprintf(stderr,"Warning: speficied character '%c' after -X, but it was already selected.\n",'n');
+								fprintf(stderr,"Warning: specified character '%c' after -X, but it was already selected.\n",'n');
 							}
 
 							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_N);
+						}  else if(optarg[i]=='s') {
+							if(CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_S)) {
+								fprintf(stderr,"Warning: specified character '%c' after -X, but it was already selected.\n",'s');
+							}
+
+							SET_REPORT_EXTRA_DATA_BIT(options->report_extra_data,CHAR_S);
 						} else if(optarg[i]=='a') {
 							fprintf(stderr,"Error: 'a' was specified, together with other -X characters, but it should be used alone.\n");
 							print_short_info_err(options);
@@ -1263,7 +1281,6 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 				}
 
 				break;
-
 
 			case 'A':
 				// This requires a patched kernel: print a warning!
@@ -1538,6 +1555,16 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 
 			case '1':
 				options->printAfter=1;
+				break;
+
+			case '2':
+				if(sscanf(optarg,SCN_MAC,MAC_SCANNER(values))!=6) {
+					fprintf(stderr,"Error when reading the reference MAC address after -2.\n");
+					print_short_info_err(options);
+				}
+				for(i=0;i<6;i++) {
+					options->referencemacaddr[i]=(uint8_t) values[i];
+				}
 				break;
 
 			case LONGOPT_initial_timeout_server_val:
@@ -1980,6 +2007,11 @@ unsigned int parse_options(int argc, char **argv, struct options *options) {
 		print_short_info_err(options);
 	}
 
+	if (options->report_extra_data!=0 && CHECK_REPORT_EXTRA_DATA_BIT_SET(options->report_extra_data,CHAR_S) && options->nonwlan_mode!=NONWLAN_MODE_WIRELESS) {
+		fprintf(stderr,"Error: the \"s\" flag after -X can only be specified for wireless interfaces.\n");
+		print_short_info_err(options);
+	}
+
 	if(options->udp_params.enabled && options->udp_params.port == options->port) {
 		fprintf(stderr,"Error: the main socket used by LaMP and the socket for the -w option cannot have the same port.\n");
 		fprintf(stderr,"Port for the main LaMP socket (it can be changed with -p): %lu\n",options->port);
@@ -2038,6 +2070,10 @@ void options_free(struct options *options) {
 
 	if(options->carbon_metric_path) {
 		free(options->carbon_metric_path);
+	}
+
+	if(options->opts_nl_sock_info.sock_valid) {
+		free_nl_socket(&options->opts_nl_sock_info);
 	}
 
 	#if AMQP_1_0_ENABLED

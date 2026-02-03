@@ -52,9 +52,9 @@ void reportStructureChangeTotalPackets(reportStructure *report, uint64_t totalPa
 void printStats(reportStructure *report, FILE *stream, uint8_t confidenceIntervalsMask);
 int printStatsCSV(struct options *opts, reportStructure *report, const char *filename);
 int printStatsSocket(struct options *opts, reportStructure *report, report_sock_data_t *sock_data,uint16_t test_id);
-int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data);
+int openTfile(const char *Tfilename, uint8_t overwrite, int followup_on_flag, char enabled_extra_data, uint8_t nonwlan_mode);
 int openReportSocket(report_sock_data_t *sock_data,struct options *opts);
-int writeToTFile(int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData);
+int writeToTFile(struct options *opts, int Tfiledescriptor,int decimal_digits,perPackerDataStructure *perPktData);
 int writeToReportSocket(report_sock_data_t *sock_data,int decimal_digits,perPackerDataStructure *perPktData,uint16_t test_id,uint8_t *first_call);
 void closeTfile(int Tfilepointer);
 void closeReportSocket(report_sock_data_t *sock_data);
